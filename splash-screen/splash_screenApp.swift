@@ -12,6 +12,7 @@ import SwiftUI
 class RainSettings: ObservableObject {
     static let shared = RainSettings()
     @Published var intensity: CGFloat = 0.5
+    @Published var drainRequested: Bool = false
 }
 
 @main
@@ -93,7 +94,15 @@ struct MenuBarView: View {
             }
 
             HStack {
+                Button("Drain") {
+                    settings.drainRequested = true
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+                .font(.system(size: 11))
+
                 Spacer()
+
                 Button("Quit") {
                     NSApp.terminate(nil)
                 }
