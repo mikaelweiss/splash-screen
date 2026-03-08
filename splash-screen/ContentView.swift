@@ -140,13 +140,11 @@ final class RainSystem {
     }
 
     private func updateLightning(dt: CGFloat) {
-        // Decay flash
         if lightningFlash > 0 {
             lightningFlash -= dt * 3.0
             if lightningFlash < 0 { lightningFlash = 0 }
         }
 
-        // Lightning only triggers above 0.6 intensity
         guard intensity > 0.6 else {
             lightningTimer = 2.0
             return
@@ -154,11 +152,8 @@ final class RainSystem {
 
         lightningTimer -= dt
         if lightningTimer <= 0 {
-            // Flash strength scales with intensity
-            let stormFactor = (intensity - 0.6) / 0.4 // 0-1 within storm range
+            let stormFactor = (intensity - 0.6) / 0.4
             lightningFlash = CGFloat.random(in: 0.4...0.6) + stormFactor * 0.4
-
-            // More frequent at higher intensity: 12s at 0.6 → 3s at 1.0
             let maxInterval = 14.0 - stormFactor * 11.0
             let minInterval = 6.0 - stormFactor * 4.5
             lightningTimer = CGFloat.random(in: minInterval...maxInterval)
@@ -173,14 +168,12 @@ final class RainSystem {
         for i in 0..<min(active, drops.count) {
             drops[i].y += (drops[i].speed * speed * dt) / size.height
 
-            // Collide with water surface or bottom of screen
             let hitY = waterLevel > 0.005 ? surfaceY : 1.03
             if drops[i].y > hitY {
                 let screenX = drops[i].x * size.width
                 let splashScreenY = waterSurfaceY(atScreenX: screenX, screenHeight: size.height)
 
                 if screenX > -10 && screenX < size.width + 10 {
-                    // Splash particles — bigger splashes when hitting water
                     let baseCount = drops[i].thickness > 1.5 ? 3 : 1
                     let waterBonus = waterLevel > 0.005 ? 1.3 : 1.0
                     let splashCount = Int(CGFloat(baseCount) * (0.5 + intensity * 0.8) * waterBonus)
@@ -195,7 +188,6 @@ final class RainSystem {
                         ))
                     }
 
-                    // Ripple on water surface
                     if drops[i].depth > 0.3 && ripples.count < Int(80 * intensity + 10) {
                         ripples.append(Ripple(
                             x: screenX,
@@ -219,7 +211,6 @@ final class RainSystem {
             s.vy += 350 * dt
             s.life -= dt * 3.5
 
-            // Kill splash if it falls back into the water
             let surfY = waterSurfaceY(atScreenX: s.x, screenHeight: size.height)
             if s.vy > 0 && s.y >= surfY {
                 s.life = 0
@@ -255,127 +246,36 @@ final class RainSystem {
     }
 }
 
-// MARK: - Visual Effect Background
-
-struct VisualEffectBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
-}
-
 // MARK: - Views
 
 struct ContentView: View {
-    @State private var intensity: CGFloat = 0.5
-
     var body: some View {
-        ZStack(alignment: .bottom) {
-            RainView(intensity: $intensity)
-                .ignoresSafeArea()
-
-            // Intensity slider
-            HStack(spacing: 12) {
-                Image(systemName: "cloud")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
-
-                Slider(value: $intensity, in: 0...1)
-                    .tint(Color(red: 0.5, green: 0.6, blue: 0.8))
-
-                Image(systemName: "cloud.bolt.rain.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.ultraThinMaterial)
-                    .opacity(0.6)
-            )
-            .padding(.horizontal, 40)
-            .padding(.bottom, 20)
-        }
-        .preferredColorScheme(.dark)
+        RainView()
+            .ignoresSafeArea()
     }
 }
 
 struct RainView: View {
-    @Binding var intensity: CGFloat
     @State private var rain = RainSystem()
 
-    // Cinematic blue-teal rain color
     private let rainColor = Color(red: 0.7, green: 0.8, blue: 0.95)
     private let splashColor = Color(red: 0.65, green: 0.75, blue: 0.9)
 
     var body: some View {
-        ZStack {
-            VisualEffectBackground()
-            TimelineView(.animation) { timeline in
-                Canvas { context, size in
-                    rain.intensity = intensity
-                    rain.update(date: timeline.date, size: size)
-                    drawDarkOverlay(in: &context, size: size)
-                    drawLightGlow(in: &context, size: size)
-                    drawRainDrops(in: &context, size: size)
-                    drawWater(in: &context, size: size)
-                    drawRipples(in: &context, size: size)
-                    drawSplashes(in: &context)
-                    drawAtmosphere(in: &context, size: size)
-                    drawLightningOverlay(in: &context, size: size)
-                }
+        TimelineView(.animation) { timeline in
+            Canvas { context, size in
+                rain.intensity = RainSettings.shared.intensity
+                rain.update(date: timeline.date, size: size)
+                drawRainDrops(in: &context, size: size)
+                drawWater(in: &context, size: size)
+                drawRipples(in: &context, size: size)
+                drawSplashes(in: &context)
+                drawLightningOverlay(in: &context, size: size)
             }
         }
     }
 
     // MARK: - Drawing
-
-    private func drawDarkOverlay(in context: inout GraphicsContext, size: CGSize) {
-        // Darker at higher intensity (stormier sky), lighter when clear
-        let alpha = 0.15 + Double(intensity) * 0.35
-        var ctx = context
-        ctx.opacity = alpha
-        ctx.fill(
-            Path(CGRect(origin: .zero, size: size)),
-            with: .color(Color(red: 0.01, green: 0.02, blue: 0.06))
-        )
-    }
-
-    private func drawLightGlow(in context: inout GraphicsContext, size: CGSize) {
-        guard intensity > 0.05 else { return }
-
-        let centerX = rain.lightX * size.width
-        let centerY = rain.lightY * size.height
-        let glowRadius = rain.lightRadius * max(size.width, size.height)
-
-        let glowOpacity = 0.08 + Double(intensity) * 0.12
-        let gradient = Gradient(stops: [
-            .init(color: Color(red: 0.15, green: 0.18, blue: 0.25, opacity: glowOpacity), location: 0),
-            .init(color: Color(red: 0.08, green: 0.10, blue: 0.15, opacity: glowOpacity * 0.5), location: 0.4),
-            .init(color: .clear, location: 1.0),
-        ])
-
-        context.fill(
-            Path(ellipseIn: CGRect(
-                x: centerX - glowRadius,
-                y: centerY - glowRadius,
-                width: glowRadius * 2,
-                height: glowRadius * 2
-            )),
-            with: .radialGradient(
-                gradient,
-                center: CGPoint(x: centerX, y: centerY),
-                startRadius: 0,
-                endRadius: glowRadius
-            )
-        )
-    }
 
     private func drawRainDrops(in context: inout GraphicsContext, size: CGSize) {
         let active = rain.activeDropCount
@@ -418,14 +318,12 @@ struct RainView: View {
 
         // Build wavy surface path
         var waterPath = Path()
-        var firstY: CGFloat = 0
         for xPos in stride(from: CGFloat(0), through: size.width, by: step) {
             let wave1 = sin(Double(xPos) * 0.02 + t * 1.8) * 1.5
             let wave2 = cos(Double(xPos) * 0.035 + t * 1.2) * 0.8
             let y = baseY + CGFloat(wave1 + wave2)
             if xPos == 0 {
                 waterPath.move(to: CGPoint(x: 0, y: y))
-                firstY = y
             } else {
                 waterPath.addLine(to: CGPoint(x: xPos, y: y))
             }
@@ -434,12 +332,11 @@ struct RainView: View {
         waterPath.addLine(to: CGPoint(x: 0, y: size.height))
         waterPath.closeSubpath()
 
-        // Water body gradient — deeper = more opaque
         let depthFactor = min(Double(rain.waterLevel) / 0.2, 1.0)
         let waterGradient = Gradient(stops: [
-            .init(color: Color(red: 0.04, green: 0.10, blue: 0.20, opacity: 0.3 * depthFactor), location: 0),
-            .init(color: Color(red: 0.03, green: 0.07, blue: 0.16, opacity: 0.5 * depthFactor), location: 0.4),
-            .init(color: Color(red: 0.02, green: 0.05, blue: 0.12, opacity: 0.65 * depthFactor), location: 1.0),
+            .init(color: Color(red: 0.04, green: 0.10, blue: 0.20, opacity: 0.12 * depthFactor), location: 0),
+            .init(color: Color(red: 0.03, green: 0.07, blue: 0.16, opacity: 0.20 * depthFactor), location: 0.4),
+            .init(color: Color(red: 0.02, green: 0.05, blue: 0.12, opacity: 0.28 * depthFactor), location: 1.0),
         ])
         context.fill(
             waterPath,
@@ -513,25 +410,6 @@ struct RainView: View {
                 style: StrokeStyle(lineWidth: 0.8)
             )
         }
-    }
-
-    private func drawAtmosphere(in context: inout GraphicsContext, size: CGSize) {
-        // Mist scales with intensity
-        let mistAlpha = Double(intensity) * 0.1
-        let mistGradient = Gradient(stops: [
-            .init(color: .clear, location: 0),
-            .init(color: Color(red: 0.08, green: 0.10, blue: 0.16, opacity: mistAlpha * 0.6), location: 0.5),
-            .init(color: Color(red: 0.10, green: 0.13, blue: 0.20, opacity: mistAlpha), location: 1.0),
-        ])
-        let mistTop = size.height * 0.68
-        context.fill(
-            Path(CGRect(x: 0, y: mistTop, width: size.width, height: size.height - mistTop)),
-            with: .linearGradient(
-                mistGradient,
-                startPoint: CGPoint(x: 0, y: mistTop),
-                endPoint: CGPoint(x: 0, y: size.height)
-            )
-        )
     }
 
     private func drawLightningOverlay(in context: inout GraphicsContext, size: CGSize) {
