@@ -49,6 +49,16 @@ final class RainSystem {
     var lightningFlash: CGFloat = 0
     private var lightningTimer: CGFloat = 6.0
 
+    // Water pooling
+    var waterLevel: CGFloat = 0 // fraction of screen height filled from bottom
+    var elapsedTime: CGFloat = 0
+    private let maxWaterLevel: CGFloat = 0.45
+
+    /// Normalized Y position of the water surface (0 = top, 1 = bottom)
+    var waterSurfaceNormalized: CGFloat {
+        1.0 - waterLevel
+    }
+
     // Light source position (normalized 0-1), upper center area
     let lightX: CGFloat = 0.5
     let lightY: CGFloat = 0.15
@@ -104,10 +114,29 @@ final class RainSystem {
         let dt = CGFloat(min(date.timeIntervalSince(last), 1.0 / 20.0))
         lastUpdate = date
 
+        updateWater(dt: dt)
         updateLightning(dt: dt)
         updateDrops(dt: dt, size: size)
-        updateSplashes(dt: dt)
+        updateSplashes(dt: dt, size: size)
         updateRipples(dt: dt)
+    }
+
+    private func updateWater(dt: CGFloat) {
+        elapsedTime += dt
+        // Water only rises, never drains. More intense rain fills faster.
+        if intensity > 0 && waterLevel < maxWaterLevel {
+            waterLevel = min(waterLevel + 0.004 * intensity * dt, maxWaterLevel)
+        }
+    }
+
+    /// Returns the water surface Y in screen coordinates at a given x position, with wave motion
+    func waterSurfaceY(atScreenX x: CGFloat, screenHeight: CGFloat) -> CGFloat {
+        let baseY = waterSurfaceNormalized * screenHeight
+        guard waterLevel > 0.005 else { return screenHeight }
+        let t = Double(elapsedTime)
+        let wave1 = sin(Double(x) * 0.02 + t * 1.8) * 1.5
+        let wave2 = cos(Double(x) * 0.035 + t * 1.2) * 0.8
+        return baseY + CGFloat(wave1 + wave2)
     }
 
     private func updateLightning(dt: CGFloat) {
@@ -139,20 +168,26 @@ final class RainSystem {
     private func updateDrops(dt: CGFloat, size: CGSize) {
         let active = activeDropCount
         let speed = speedMultiplier
+        let surfaceY = waterSurfaceNormalized
 
         for i in 0..<min(active, drops.count) {
             drops[i].y += (drops[i].speed * speed * dt) / size.height
 
-            if drops[i].y > 1.03 {
+            // Collide with water surface or bottom of screen
+            let hitY = waterLevel > 0.005 ? surfaceY : 1.03
+            if drops[i].y > hitY {
                 let screenX = drops[i].x * size.width
+                let splashScreenY = waterSurfaceY(atScreenX: screenX, screenHeight: size.height)
+
                 if screenX > -10 && screenX < size.width + 10 {
-                    // Splash particles — more at higher intensity
+                    // Splash particles — bigger splashes when hitting water
                     let baseCount = drops[i].thickness > 1.5 ? 3 : 1
-                    let splashCount = Int(CGFloat(baseCount) * (0.5 + intensity * 0.8))
+                    let waterBonus = waterLevel > 0.005 ? 1.3 : 1.0
+                    let splashCount = Int(CGFloat(baseCount) * (0.5 + intensity * 0.8) * waterBonus)
                     for _ in 0..<splashCount {
                         splashes.append(SplashParticle(
                             x: screenX + CGFloat.random(in: -3...3),
-                            y: size.height,
+                            y: splashScreenY,
                             vx: CGFloat.random(in: -45...45),
                             vy: CGFloat.random(in: -80 ... -10),
                             life: 1.0,
@@ -160,11 +195,11 @@ final class RainSystem {
                         ))
                     }
 
-                    // Ripple on ground
+                    // Ripple on water surface
                     if drops[i].depth > 0.3 && ripples.count < Int(80 * intensity + 10) {
                         ripples.append(Ripple(
                             x: screenX,
-                            y: size.height - CGFloat.random(in: 0...8),
+                            y: splashScreenY,
                             life: 1.0,
                             maxRadius: 3 + drops[i].depth * 12
                         ))
@@ -175,7 +210,7 @@ final class RainSystem {
         }
     }
 
-    private func updateSplashes(dt: CGFloat) {
+    private func updateSplashes(dt: CGFloat, size: CGSize) {
         var w = 0
         for i in splashes.indices {
             var s = splashes[i]
@@ -183,6 +218,13 @@ final class RainSystem {
             s.y += s.vy * dt
             s.vy += 350 * dt
             s.life -= dt * 3.5
+
+            // Kill splash if it falls back into the water
+            let surfY = waterSurfaceY(atScreenX: s.x, screenHeight: size.height)
+            if s.vy > 0 && s.y >= surfY {
+                s.life = 0
+            }
+
             if s.life > 0 {
                 splashes[w] = s
                 w += 1
@@ -281,8 +323,9 @@ struct RainView: View {
                     rain.update(date: timeline.date, size: size)
                     drawDarkOverlay(in: &context, size: size)
                     drawLightGlow(in: &context, size: size)
-                    drawRipples(in: &context, size: size)
                     drawRainDrops(in: &context, size: size)
+                    drawWater(in: &context, size: size)
+                    drawRipples(in: &context, size: size)
                     drawSplashes(in: &context)
                     drawAtmosphere(in: &context, size: size)
                     drawLightningOverlay(in: &context, size: size)
@@ -336,10 +379,11 @@ struct RainView: View {
 
     private func drawRainDrops(in context: inout GraphicsContext, size: CGSize) {
         let active = rain.activeDropCount
+        let surfaceBaseY = rain.waterSurfaceNormalized * size.height
         for i in 0..<min(active, rain.drops.count) {
             let drop = rain.drops[i]
             let x = drop.x * size.width
-            let bottomY = drop.y * size.height
+            let bottomY = min(drop.y * size.height, surfaceBaseY)
             let streakLength = drop.length * rain.streakMultiplier
             let topY = bottomY - streakLength
 
@@ -363,6 +407,69 @@ struct RainView: View {
                 style: StrokeStyle(lineWidth: drop.thickness, lineCap: .round)
             )
         }
+    }
+
+    private func drawWater(in context: inout GraphicsContext, size: CGSize) {
+        guard rain.waterLevel > 0.005 else { return }
+
+        let t = Double(rain.elapsedTime)
+        let baseY = rain.waterSurfaceNormalized * size.height
+        let step: CGFloat = 3
+
+        // Build wavy surface path
+        var waterPath = Path()
+        var firstY: CGFloat = 0
+        for xPos in stride(from: CGFloat(0), through: size.width, by: step) {
+            let wave1 = sin(Double(xPos) * 0.02 + t * 1.8) * 1.5
+            let wave2 = cos(Double(xPos) * 0.035 + t * 1.2) * 0.8
+            let y = baseY + CGFloat(wave1 + wave2)
+            if xPos == 0 {
+                waterPath.move(to: CGPoint(x: 0, y: y))
+                firstY = y
+            } else {
+                waterPath.addLine(to: CGPoint(x: xPos, y: y))
+            }
+        }
+        waterPath.addLine(to: CGPoint(x: size.width, y: size.height))
+        waterPath.addLine(to: CGPoint(x: 0, y: size.height))
+        waterPath.closeSubpath()
+
+        // Water body gradient — deeper = more opaque
+        let depthFactor = min(Double(rain.waterLevel) / 0.2, 1.0)
+        let waterGradient = Gradient(stops: [
+            .init(color: Color(red: 0.04, green: 0.10, blue: 0.20, opacity: 0.3 * depthFactor), location: 0),
+            .init(color: Color(red: 0.03, green: 0.07, blue: 0.16, opacity: 0.5 * depthFactor), location: 0.4),
+            .init(color: Color(red: 0.02, green: 0.05, blue: 0.12, opacity: 0.65 * depthFactor), location: 1.0),
+        ])
+        context.fill(
+            waterPath,
+            with: .linearGradient(
+                waterGradient,
+                startPoint: CGPoint(x: 0, y: baseY),
+                endPoint: CGPoint(x: 0, y: size.height)
+            )
+        )
+
+        // Surface highlight line
+        var surfaceLine = Path()
+        for xPos in stride(from: CGFloat(0), through: size.width, by: step) {
+            let wave1 = sin(Double(xPos) * 0.02 + t * 1.8) * 1.5
+            let wave2 = cos(Double(xPos) * 0.035 + t * 1.2) * 0.8
+            let y = baseY + CGFloat(wave1 + wave2)
+            if xPos == 0 {
+                surfaceLine.move(to: CGPoint(x: 0, y: y))
+            } else {
+                surfaceLine.addLine(to: CGPoint(x: xPos, y: y))
+            }
+        }
+
+        var lineCtx = context
+        lineCtx.opacity = 0.25 * depthFactor
+        lineCtx.stroke(
+            surfaceLine,
+            with: .color(Color(red: 0.4, green: 0.55, blue: 0.75)),
+            style: StrokeStyle(lineWidth: 1.0)
+        )
     }
 
     private func drawSplashes(in context: inout GraphicsContext) {
