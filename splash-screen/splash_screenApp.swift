@@ -13,6 +13,7 @@ class RainSettings: ObservableObject {
     static let shared = RainSettings()
     @Published var intensity: CGFloat = 0.5
     @Published var drainRequested: Bool = false
+    @Published var fishEnabled: Bool = false
 }
 
 @main
@@ -100,6 +101,15 @@ struct MenuBarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.blue)
                 .font(.system(size: 11))
+
+                Spacer()
+
+                Toggle(isOn: $settings.fishEnabled) {
+                    Image(systemName: "fish.fill")
+                        .font(.system(size: 10))
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
 
                 Spacer()
 

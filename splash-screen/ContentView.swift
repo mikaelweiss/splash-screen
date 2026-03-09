@@ -86,6 +86,26 @@ struct DebrisParticle {
     var rotationSpeed: CGFloat
 }
 
+// MARK: - Fish Model
+
+struct Fish {
+    var x: CGFloat           // normalized position
+    var y: CGFloat
+    var angle: CGFloat       // heading in radians
+    var speed: CGFloat       // normalized units per second
+    var size: CGFloat        // body length in points
+    var swimPhase: CGFloat   // oscillation phase
+    var swimFrequency: CGFloat // how fast the tail waggles
+    var targetX: CGFloat     // wandering target
+    var targetY: CGFloat
+    var targetTimer: CGFloat // time until picking new target
+    var phaseOffset: CGFloat // for vertical bobbing desync
+    var hue: CGFloat         // fish color hue (0-1)
+    var saturation: CGFloat
+    var brightness: CGFloat
+    var bellyBrightness: CGFloat
+}
+
 // MARK: - Rain System
 
 final class RainSystem {
@@ -124,6 +144,11 @@ final class RainSystem {
     var screenShakeY: CGFloat = 0
     var screenShakeIntensity: CGFloat = 0
 
+    // Fish
+    var fish: [Fish] = []
+    var fishEnabled: Bool = false
+    private let maxFishCount = 12
+
     /// Normalized Y position of the water surface (0 = top, 1 = bottom)
     var waterSurfaceNormalized: CGFloat {
         1.0 - waterLevel
@@ -156,6 +181,7 @@ final class RainSystem {
         drops.reserveCapacity(maxDropCount)
         splashes.reserveCapacity(400)
         ripples.reserveCapacity(100)
+        fish.reserveCapacity(maxFishCount)
         for _ in 0..<maxDropCount {
             drops.append(makeDrop(fullRangeY: true))
         }
@@ -189,6 +215,7 @@ final class RainSystem {
         updateDrops(dt: dt, size: size)
         updateSplashes(dt: dt, size: size)
         updateRipples(dt: dt)
+        updateFish(dt: dt)
         updateDrainSequence(dt: dt, size: size)
     }
 
@@ -309,6 +336,143 @@ final class RainSystem {
             }
         }
         ripples.removeSubrange(w...)
+    }
+
+    // MARK: - Fish
+
+    private func makeFish(waterTop: CGFloat) -> Fish {
+        let goingRight = Bool.random()
+        let startX: CGFloat = goingRight ? CGFloat.random(in: -0.15 ... -0.05) : CGFloat.random(in: 1.05...1.15)
+        let angle: CGFloat = goingRight ? CGFloat.random(in: -0.2...0.2) : .pi + CGFloat.random(in: -0.2...0.2)
+        let waterDepth = 1.0 - waterTop
+        let minY = waterTop + waterDepth * 0.15
+        let maxY = waterTop + waterDepth * 0.85
+        let y = CGFloat.random(in: minY...maxY)
+
+        let hue = [
+            CGFloat.random(in: 0.05...0.12),   // orange/gold
+            CGFloat.random(in: 0.55...0.62),    // blue
+            CGFloat.random(in: 0.30...0.38),    // green/teal
+            CGFloat.random(in: 0.0...0.03),     // red
+            CGFloat.random(in: 0.08...0.15),    // yellow-orange
+        ].randomElement()!
+
+        let size = CGFloat.random(in: 14...30)
+        let speed = (0.03 + CGFloat.random(in: 0...0.04)) * (28.0 / size) // smaller fish faster
+
+        return Fish(
+            x: startX,
+            y: y,
+            angle: angle,
+            speed: speed,
+            size: size,
+            swimPhase: CGFloat.random(in: 0...(.pi * 2)),
+            swimFrequency: CGFloat.random(in: 4.0...7.0),
+            targetX: CGFloat.random(in: 0.1...0.9),
+            targetY: CGFloat.random(in: minY...maxY),
+            targetTimer: CGFloat.random(in: 2.0...5.0),
+            phaseOffset: CGFloat.random(in: 0...(.pi * 2)),
+            hue: hue,
+            saturation: CGFloat.random(in: 0.5...0.8),
+            brightness: CGFloat.random(in: 0.45...0.65),
+            bellyBrightness: CGFloat.random(in: 0.75...0.90)
+        )
+    }
+
+    private func updateFish(dt: CGFloat) {
+        let waterTop = waterSurfaceNormalized
+        let waterDepth = 1.0 - waterTop
+
+        // Remove fish when disabled
+        if !fishEnabled {
+            fish.removeAll()
+            return
+        }
+
+        // Only spawn fish when there's enough water
+        guard waterLevel > 0.08, drainPhase == .idle || drainPhase == .subEntering else {
+            // During drain, let existing fish swim out
+            if drainPhase == .draining || drainPhase == .impact || drainPhase == .done {
+                var w = 0
+                for i in fish.indices {
+                    var f = fish[i]
+                    // Fish flee downward during drain
+                    f.speed = f.speed * 1.01
+                    f.swimPhase += dt * f.swimFrequency * 1.5
+                    f.x += cos(f.angle) * f.speed * dt * 2.0
+                    f.y += 0.1 * dt
+                    if f.y < 1.3 {
+                        fish[w] = f
+                        w += 1
+                    }
+                }
+                fish.removeSubrange(w...)
+            }
+            return
+        }
+
+        // Spawn fish up to max count
+        if fish.count < maxFishCount {
+            // Spawn gradually, not all at once
+            if CGFloat.random(in: 0...1) < 0.02 {
+                fish.append(makeFish(waterTop: waterTop))
+            }
+        }
+
+        let minY = waterTop + waterDepth * 0.1
+        let maxY = waterTop + waterDepth * 0.88
+
+        for i in fish.indices {
+            // Advance swim phase (tail wagging)
+            fish[i].swimPhase += dt * fish[i].swimFrequency
+
+            // Speed variation (subtle pulsing)
+            let speedMod: CGFloat = 0.8 + 0.2 * sin(elapsedTime * 0.5 + fish[i].phaseOffset)
+            let currentSpeed = fish[i].speed * speedMod
+
+            // Update wandering target
+            fish[i].targetTimer -= dt
+            if fish[i].targetTimer <= 0 {
+                fish[i].targetX = CGFloat.random(in: 0.05...0.95)
+                fish[i].targetY = CGFloat.random(in: minY...maxY)
+                fish[i].targetTimer = CGFloat.random(in: 2.5...6.0)
+            }
+
+            // Steer toward target with smooth turning
+            let targetAngle = atan2(fish[i].targetY - fish[i].y, fish[i].targetX - fish[i].x)
+            var angleDiff = targetAngle - fish[i].angle
+            // Normalize to -pi...pi
+            while angleDiff > .pi { angleDiff -= 2 * .pi }
+            while angleDiff < -.pi { angleDiff += 2 * .pi }
+
+            let turnSpeed: CGFloat = 1.8
+            let maxTurn = turnSpeed * dt
+            fish[i].angle += max(-maxTurn, min(maxTurn, angleDiff))
+
+            // Move forward
+            fish[i].x += cos(fish[i].angle) * currentSpeed * dt
+            fish[i].y += sin(fish[i].angle) * currentSpeed * dt
+
+            // Gentle vertical bobbing
+            fish[i].y += sin(elapsedTime * 0.7 + fish[i].phaseOffset) * 0.001 * dt
+
+            // Keep fish within water bounds (soft constraint)
+            if fish[i].y < minY {
+                fish[i].y = minY + 0.005
+                if fish[i].angle < 0 { fish[i].angle *= 0.8 }
+            }
+            if fish[i].y > maxY {
+                fish[i].y = maxY - 0.005
+                if fish[i].angle > 0 { fish[i].angle *= 0.8 }
+            }
+
+            // Remove fish that have wandered off screen for too long
+            if fish[i].x < -0.2 || fish[i].x > 1.2 {
+                // Redirect back toward center
+                fish[i].targetX = CGFloat.random(in: 0.2...0.8)
+                fish[i].targetTimer = 0.5
+            }
+        }
     }
 
     func lightIntensity(nx: CGFloat, ny: CGFloat) -> CGFloat {
@@ -522,6 +686,7 @@ final class RainSystem {
             shards.removeAll()
             drainParticles.removeAll()
             debrisParticles.removeAll()
+            fish.removeAll()
             crackProgress = 0
             screenShakeIntensity = 0
             // Allow restarting
@@ -772,6 +937,7 @@ struct RainView: View {
         TimelineView(.animation) { timeline in
             Canvas { context, size in
                 rain.intensity = RainSettings.shared.intensity
+                rain.fishEnabled = RainSettings.shared.fishEnabled
                 if RainSettings.shared.drainRequested {
                     RainSettings.shared.drainRequested = false
                     rain.startDrainSequence()
@@ -786,6 +952,7 @@ struct RainView: View {
                 drawRainDrops(in: &context, size: size)
                 drawSubmarine(in: &context, size: size)
                 drawWater(in: &context, size: size)
+                drawFish(in: &context, size: size)
                 drawTorpedo(in: &context, size: size)
                 drawRipples(in: &context, size: size)
                 drawSplashes(in: &context)
@@ -933,6 +1100,168 @@ struct RainView: View {
                 with: .color(Color(red: 0.5, green: 0.6, blue: 0.75)),
                 style: StrokeStyle(lineWidth: 0.8)
             )
+        }
+    }
+
+    // MARK: - Fish Drawing
+
+    private func drawFish(in context: inout GraphicsContext, size: CGSize) {
+        guard !rain.fish.isEmpty else { return }
+
+        for fish in rain.fish {
+            let px = fish.x * size.width
+            let py = fish.y * size.height
+            let s = fish.size
+
+            // Depth-based opacity: fish deeper in water are slightly more transparent
+            let waterTop = rain.waterSurfaceNormalized
+            let depthInWater = (fish.y - waterTop) / (1.0 - waterTop)
+            let depthOpacity = 0.5 + 0.5 * (1.0 - min(depthInWater, 1.0))
+
+            var ctx = context
+            ctx.opacity = Double(depthOpacity)
+
+            // Transform: translate to fish position, rotate to heading
+            ctx.translateBy(x: px, y: py)
+            ctx.rotate(by: .radians(Double(fish.angle)))
+
+            // Flip vertically if swimming left so the fish shape faces forward
+            let facingLeft = abs(fish.angle) > .pi / 2
+            if facingLeft {
+                ctx.scaleBy(x: 1, y: -1)
+            }
+
+            // -- Tail (drawn first, behind body) --
+            let tailWag = sin(fish.swimPhase) * 0.35
+            var tailCtx = ctx
+            tailCtx.translateBy(x: -s * 0.45, y: 0)
+            tailCtx.rotate(by: .radians(Double(tailWag)))
+
+            let tailSpread = s * 0.35
+            let tailLength = s * 0.25
+            var tailPath = Path()
+            tailPath.move(to: .zero)
+            tailPath.addLine(to: CGPoint(x: -tailLength, y: -tailSpread))
+            tailPath.addQuadCurve(
+                to: CGPoint(x: -tailLength, y: tailSpread),
+                control: CGPoint(x: -tailLength * 0.4, y: 0)
+            )
+            tailPath.closeSubpath()
+
+            let tailColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation * 0.9), brightness: Double(fish.brightness * 0.85))
+            tailCtx.fill(tailPath, with: .color(tailColor))
+            tailCtx.opacity = Double(depthOpacity) * 0.4
+            tailCtx.stroke(tailPath, with: .color(Color(hue: Double(fish.hue), saturation: Double(fish.saturation), brightness: Double(fish.brightness * 0.5))), style: StrokeStyle(lineWidth: 0.5))
+
+            // -- Dorsal fin (on top of body, subtle wave) --
+            let finWag = sin(fish.swimPhase * 0.6 + 1.0) * 0.12
+            var finCtx = ctx
+            finCtx.translateBy(x: s * 0.05, y: -s * 0.18)
+            finCtx.rotate(by: .radians(Double(finWag)))
+
+            var dorsalPath = Path()
+            dorsalPath.move(to: CGPoint(x: -s * 0.12, y: 0))
+            dorsalPath.addQuadCurve(
+                to: CGPoint(x: s * 0.12, y: 0),
+                control: CGPoint(x: 0, y: -s * 0.18)
+            )
+            dorsalPath.closeSubpath()
+
+            let finColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation * 0.7), brightness: Double(fish.brightness * 0.75), opacity: 0.7)
+            finCtx.fill(dorsalPath, with: .color(finColor))
+
+            // -- Pectoral fin (small, below and behind head) --
+            let pectoralWag = sin(fish.swimPhase * 0.8 + 2.0) * 0.15
+            var pecCtx = ctx
+            pecCtx.translateBy(x: s * 0.1, y: s * 0.12)
+            pecCtx.rotate(by: .radians(Double(pectoralWag)))
+
+            var pectoralPath = Path()
+            pectoralPath.move(to: .zero)
+            pectoralPath.addQuadCurve(
+                to: CGPoint(x: -s * 0.14, y: s * 0.08),
+                control: CGPoint(x: -s * 0.02, y: s * 0.12)
+            )
+            pectoralPath.addLine(to: .zero)
+            pectoralPath.closeSubpath()
+
+            pecCtx.opacity = Double(depthOpacity) * 0.6
+            pecCtx.fill(pectoralPath, with: .color(finColor))
+
+            // -- Body (2 cubic bezier curves forming a fish shape) --
+            let bodyW = s * 0.9
+            let bodyH = s * 0.38
+
+            // Slight body undulation: middle of body sways opposite to tail
+            let bodyWag = sin(fish.swimPhase - 0.5) * s * 0.015
+
+            var bodyPath = Path()
+            // Start at nose
+            let nose = CGPoint(x: bodyW * 0.5, y: 0)
+            bodyPath.move(to: nose)
+
+            // Top curve: nose -> tail
+            bodyPath.addCurve(
+                to: CGPoint(x: -bodyW * 0.4, y: bodyWag * 0.5),
+                control1: CGPoint(x: bodyW * 0.3, y: -bodyH * 0.9),
+                control2: CGPoint(x: -bodyW * 0.1, y: -bodyH * 0.5 + bodyWag)
+            )
+
+            // Bottom curve: tail -> nose
+            bodyPath.addCurve(
+                to: nose,
+                control1: CGPoint(x: -bodyW * 0.1, y: bodyH * 0.5 + bodyWag),
+                control2: CGPoint(x: bodyW * 0.3, y: bodyH * 0.9)
+            )
+            bodyPath.closeSubpath()
+
+            // Gradient fill: dark back, light belly
+            let topColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation), brightness: Double(fish.brightness))
+            let bellyColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation * 0.3), brightness: Double(fish.bellyBrightness))
+
+            ctx.fill(bodyPath, with: .linearGradient(
+                Gradient(colors: [topColor, bellyColor]),
+                startPoint: CGPoint(x: 0, y: -bodyH),
+                endPoint: CGPoint(x: 0, y: bodyH)
+            ))
+
+            // Body outline (subtle)
+            let outlineColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation), brightness: Double(fish.brightness * 0.4))
+            var outCtx = ctx
+            outCtx.opacity = Double(depthOpacity) * 0.35
+            outCtx.stroke(bodyPath, with: .color(outlineColor), style: StrokeStyle(lineWidth: 0.7))
+
+            // -- Eye --
+            let eyeX = bodyW * 0.28
+            let eyeY: CGFloat = -bodyH * 0.08
+            let eyeR = s * 0.04
+
+            // White of eye
+            ctx.fill(
+                Path(ellipseIn: CGRect(x: eyeX - eyeR * 1.3, y: eyeY - eyeR * 1.3, width: eyeR * 2.6, height: eyeR * 2.6)),
+                with: .color(Color(white: 0.95, opacity: 0.8))
+            )
+
+            // Pupil
+            var eyeCtx = ctx
+            eyeCtx.opacity = 1.0
+            eyeCtx.fill(
+                Path(ellipseIn: CGRect(x: eyeX - eyeR, y: eyeY - eyeR, width: eyeR * 2, height: eyeR * 2)),
+                with: .color(Color(white: 0.05))
+            )
+
+            // Eye specular highlight
+            let specR = eyeR * 0.45
+            eyeCtx.fill(
+                Path(ellipseIn: CGRect(x: eyeX - eyeR * 0.4 - specR / 2, y: eyeY - eyeR * 0.4 - specR / 2, width: specR, height: specR)),
+                with: .color(Color(white: 1.0, opacity: 0.9))
+            )
+
+            // -- Specular body highlight (near head, top) --
+            var hlCtx = ctx
+            hlCtx.opacity = Double(depthOpacity) * 0.15
+            let hlRect = CGRect(x: bodyW * 0.05, y: -bodyH * 0.55, width: bodyW * 0.3, height: bodyH * 0.3)
+            hlCtx.fill(Path(ellipseIn: hlRect), with: .color(.white))
         }
     }
 
