@@ -11,9 +11,23 @@ import SwiftUI
 /// Shared intensity value accessible from both the menu bar popover and the rain overlay
 class RainSettings: ObservableObject {
     static let shared = RainSettings()
-    @Published var intensity: CGFloat = 0.5
+
+    @Published var intensity: CGFloat {
+        didSet { UserDefaults.standard.set(Double(intensity), forKey: "rainIntensity") }
+    }
     @Published var drainRequested: Bool = false
-    @Published var fishEnabled: Bool = false
+    @Published var fishEnabled: Bool {
+        didSet { UserDefaults.standard.set(fishEnabled, forKey: "fishEnabled") }
+    }
+
+    private init() {
+        let defaults = UserDefaults.standard
+        // Use object(forKey:) to distinguish "not set" from "explicitly set to 0"
+        self.intensity = defaults.object(forKey: "rainIntensity") != nil
+            ? CGFloat(defaults.double(forKey: "rainIntensity"))
+            : 0.5
+        self.fishEnabled = defaults.bool(forKey: "fishEnabled")
+    }
 }
 
 @main
