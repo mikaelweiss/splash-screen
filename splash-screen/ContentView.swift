@@ -147,6 +147,7 @@ final class RainSystem {
     // Fish
     var fish: [Fish] = []
     var fishEnabled: Bool = false
+    var waterLevelEnabled: Bool = true
     private let maxFishCount = 12
 
     /// Normalized Y position of the water surface (0 = top, 1 = bottom)
@@ -223,6 +224,11 @@ final class RainSystem {
         elapsedTime += dt
         // Don't rise water during drain sequence
         guard drainPhase == .idle else { return }
+        // Keep water at 0 when water level is disabled
+        if !waterLevelEnabled {
+            waterLevel = 0
+            return
+        }
         if intensity > 0 && waterLevel < maxWaterLevel {
             waterLevel = min(waterLevel + 0.004 * intensity * dt, maxWaterLevel)
         }
@@ -938,6 +944,7 @@ struct RainView: View {
             Canvas { context, size in
                 rain.intensity = RainSettings.shared.intensity
                 rain.fishEnabled = RainSettings.shared.fishEnabled
+                rain.waterLevelEnabled = RainSettings.shared.waterLevelEnabled
                 if RainSettings.shared.drainRequested {
                     RainSettings.shared.drainRequested = false
                     rain.startDrainSequence()

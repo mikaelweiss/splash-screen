@@ -19,6 +19,9 @@ class RainSettings: ObservableObject {
     @Published var fishEnabled: Bool {
         didSet { UserDefaults.standard.set(fishEnabled, forKey: "fishEnabled") }
     }
+    @Published var waterLevelEnabled: Bool {
+        didSet { UserDefaults.standard.set(waterLevelEnabled, forKey: "waterLevelEnabled") }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -27,6 +30,9 @@ class RainSettings: ObservableObject {
             ? CGFloat(defaults.double(forKey: "rainIntensity"))
             : 0.5
         self.fishEnabled = defaults.bool(forKey: "fishEnabled")
+        self.waterLevelEnabled = defaults.object(forKey: "waterLevelEnabled") != nil
+            ? defaults.bool(forKey: "waterLevelEnabled")
+            : true
     }
 }
 
@@ -117,6 +123,15 @@ struct MenuBarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.blue)
                 .font(.system(size: 11))
+
+                Spacer()
+
+                Toggle(isOn: $settings.waterLevelEnabled) {
+                    Image(systemName: "water.waves")
+                        .font(.system(size: 10))
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
 
                 Spacer()
 
