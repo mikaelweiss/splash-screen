@@ -57,7 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.target = self
         }
 
-        // Popover with intensity slider
+        // Popover with controls
         let popover = NSPopover()
         popover.contentSize = NSSize(width: 280, height: 100)
         popover.behavior = .transient
@@ -87,6 +87,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 }
@@ -136,5 +138,6 @@ struct MenuBarView: View {
             }
         }
         .padding(16)
+        .frame(width: 280)
     }
 }
