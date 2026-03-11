@@ -45,6 +45,7 @@ struct splash_screenApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    var overlayWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -75,9 +76,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             window.isOpaque = false
             window.backgroundColor = .clear
             window.hasShadow = false
-            window.level = .screenSaver
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.level = .floating
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             window.ignoresMouseEvents = true
+            window.sharingType = .none
+            self.overlayWindow = window
+
+            self.startScreenshotMonitoring()
+        }
+    }
+
+    // MARK: - Screenshot Detection
+
+    private var screenshotPollTimer: Timer?
+    private var wasHiddenForScreenshot = false
+
+    private func startScreenshotMonitoring() {
+        screenshotPollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let screenshotActive = self.isScreenshotUIRunning()
+            if screenshotActive && !self.wasHiddenForScreenshot {
+                self.wasHiddenForScreenshot = true
+                self.overlayWindow?.orderOut(nil)
+            } else if !screenshotActive && self.wasHiddenForScreenshot {
+                self.wasHiddenForScreenshot = false
+                self.overlayWindow?.orderFront(nil)
+            }
+        }
+    }
+
+    private func isScreenshotUIRunning() -> Bool {
+        guard let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        return windowList.contains { info in
+            let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+            return owner == "screencaptureui" || owner == "Screenshot"
         }
     }
 
