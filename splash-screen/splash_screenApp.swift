@@ -37,18 +37,14 @@ class RainSettings: ObservableObject {
 }
 
 @main
-struct splash_screenApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-        .windowStyle(.hiddenTitleBar)
-    }
-}
-
 class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     var overlayWindow: NSWindow?
@@ -72,24 +68,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(rootView: MenuBarView())
         self.popover = popover
 
-        // Configure overlay window
-        DispatchQueue.main.async {
-            guard let window = NSApplication.shared.windows.first,
-                  let screen = NSScreen.main else { return }
+        // Create overlay window programmatically so it's always fullscreen & borderless
+        guard let screen = NSScreen.main else { return }
 
-            window.styleMask = [.borderless]
-            window.setFrame(screen.frame, display: true)
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = false
-            window.level = .floating
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-            window.ignoresMouseEvents = true
-            window.sharingType = .none
-            self.overlayWindow = window
+        let window = NSWindow(
+            contentRect: screen.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: ContentView())
+        window.setFrame(screen.frame, display: true)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        window.ignoresMouseEvents = true
+        window.sharingType = .none
+        window.orderFrontRegardless()
+        self.overlayWindow = window
 
-            self.startScreenshotMonitoring()
-        }
+        startScreenshotMonitoring()
+        startScreenChangeMonitoring()
     }
 
     // MARK: - Screenshot Detection
@@ -106,9 +107,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self.overlayWindow?.orderOut(nil)
             } else if !screenshotActive && self.wasHiddenForScreenshot {
                 self.wasHiddenForScreenshot = false
-                self.overlayWindow?.orderFront(nil)
+                self.overlayWindow?.orderFrontRegardless()
             }
         }
+    }
+
+    // MARK: - Screen Change Detection
+
+    private func startScreenChangeMonitoring() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    @objc private func screenParametersChanged() {
+        guard let screen = NSScreen.main else { return }
+        overlayWindow?.setFrame(screen.frame, display: true)
     }
 
     private func isScreenshotUIRunning() -> Bool {
