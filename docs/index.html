@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Splash Screen — Rain on your Mac</title>
+  <meta name="description" content="A macOS menu bar app that puts rain, rising water, and swimming fish on your desktop.">
+  <meta property="og:title" content="Splash Screen — Rain on your Mac">
+  <meta property="og:description" content="A macOS menu bar app. Rain falls, water pools, fish swim around, and a submarine shows up if you drain it.">
+  <meta property="og:type" content="website">
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background: #080c14;
+      color: #e5dfd6;
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
+    }
+
+    .content {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ---- Hero ---- */
+
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      padding: 6rem 0;
+    }
+
+    .app-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 16px;
+      margin-bottom: 2rem;
+      box-shadow: 0 2px 16px rgba(0, 0, 0, 0.5);
+    }
+
+    h1 {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: clamp(2.5rem, 5.5vw, 3.8rem);
+      font-weight: normal;
+      line-height: 1.08;
+      letter-spacing: -0.025em;
+      margin-bottom: 1.25rem;
+      text-wrap: balance;
+    }
+
+    .subtitle {
+      font-size: 1.1rem;
+      line-height: 1.5;
+      color: #8a919e;
+      max-width: 480px;
+      margin-bottom: 2.5rem;
+    }
+
+    /* ---- Rain ---- */
+
+    .rain {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .rain span {
+      position: absolute;
+      left: calc(var(--x) * 1%);
+      height: calc(var(--h) * 1px);
+      width: 1px;
+      opacity: var(--o);
+      background: linear-gradient(to bottom, transparent, #8caad4);
+      animation: fall calc(var(--s) * 1s) linear infinite;
+      animation-delay: calc(var(--d) * -1s);
+    }
+
+    @keyframes fall {
+      from { transform: translateY(-40px); }
+      to { transform: translateY(100vh); }
+    }
+
+    .water {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 120px;
+      background: linear-gradient(to bottom, transparent, rgba(8, 20, 45, 0.5) 40%, rgba(10, 30, 65, 0.7));
+      pointer-events: none;
+    }
+
+    /* ---- CTA ---- */
+
+    .cta {
+      display: inline-block;
+      padding: 14px 28px;
+      background: #d4854a;
+      color: #080c14;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      letter-spacing: 0.01em;
+      transition: background 0.15s ease;
+    }
+
+    .cta:hover {
+      background: #e09560;
+    }
+
+    .cta:active {
+      transform: scale(0.98);
+    }
+
+    /* ---- Sections ---- */
+
+    .section {
+      padding: 5rem 0;
+    }
+
+    .section + .section {
+      border-top: 1px solid rgba(140, 160, 190, 0.08);
+    }
+
+    h2 {
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: clamp(1.4rem, 3vw, 1.8rem);
+      font-weight: normal;
+      line-height: 1.2;
+      letter-spacing: -0.015em;
+      margin-bottom: 1.25rem;
+      text-wrap: balance;
+    }
+
+    .section p {
+      font-size: 1.05rem;
+      line-height: 1.65;
+      color: #8a919e;
+    }
+
+    .section p + p {
+      margin-top: 1rem;
+    }
+
+    /* ---- Features ---- */
+
+    .features {
+      list-style: none;
+    }
+
+    .features li {
+      position: relative;
+      padding-left: 1.5rem;
+      margin-bottom: 0.75rem;
+      font-size: 1.05rem;
+      line-height: 1.5;
+      color: #8a919e;
+    }
+
+    .features li::before {
+      content: '\2014';
+      position: absolute;
+      left: 0;
+      color: #3d4555;
+    }
+
+    /* ---- Footer ---- */
+
+    footer {
+      padding: 5rem 0 4rem;
+      border-top: 1px solid rgba(140, 160, 190, 0.08);
+      text-align: center;
+    }
+
+    footer p {
+      color: #8a919e;
+      font-size: 1.1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .colophon {
+      margin-top: 3rem;
+      font-size: 0.8rem;
+      color: #3d4555;
+    }
+
+    /* ---- Responsive ---- */
+
+    @media (max-width: 480px) {
+      .hero-content {
+        padding: 4rem 0;
+      }
+
+      .section {
+        padding: 3.5rem 0;
+      }
+
+      .app-icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+      }
+
+      .subtitle {
+        font-size: 1rem;
+      }
+    }
+
+    /* ---- Accessibility ---- */
+
+    @media (prefers-reduced-motion: reduce) {
+      .rain span {
+        animation-play-state: paused;
+      }
+    }
+
+    /* Focus styles */
+    .cta:focus-visible {
+      outline: 2px solid #d4854a;
+      outline-offset: 3px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="rain" aria-hidden="true">
+      <!-- Foreground — fast, large, brighter -->
+      <span style="--x:2;--h:30;--o:0.25;--s:0.6;--d:0.1"></span>
+      <span style="--x:8;--h:28;--o:0.22;--s:0.55;--d:0.8"></span>
+      <span style="--x:15;--h:32;--o:0.28;--s:0.65;--d:0.3"></span>
+      <span style="--x:23;--h:26;--o:0.2;--s:0.58;--d:1.5"></span>
+      <span style="--x:31;--h:34;--o:0.26;--s:0.52;--d:0.6"></span>
+      <span style="--x:40;--h:29;--o:0.23;--s:0.62;--d:1.1"></span>
+      <span style="--x:52;--h:31;--o:0.27;--s:0.57;--d:0.2"></span>
+      <span style="--x:61;--h:27;--o:0.21;--s:0.68;--d:1.8"></span>
+      <span style="--x:70;--h:33;--o:0.24;--s:0.54;--d:0.9"></span>
+      <span style="--x:78;--h:28;--o:0.26;--s:0.6;--d:0.4"></span>
+      <span style="--x:87;--h:30;--o:0.22;--s:0.63;--d:1.3"></span>
+      <span style="--x:95;--h:35;--o:0.28;--s:0.51;--d:0.7"></span>
+      <!-- Midground — medium speed, medium size -->
+      <span style="--x:5;--h:20;--o:0.15;--s:0.8;--d:0.5"></span>
+      <span style="--x:11;--h:18;--o:0.13;--s:0.85;--d:1.2"></span>
+      <span style="--x:18;--h:22;--o:0.17;--s:0.75;--d:0.1"></span>
+      <span style="--x:25;--h:16;--o:0.14;--s:0.9;--d:1.7"></span>
+      <span style="--x:33;--h:21;--o:0.16;--s:0.78;--d:0.4"></span>
+      <span style="--x:38;--h:19;--o:0.13;--s:0.88;--d:0.9"></span>
+      <span style="--x:45;--h:23;--o:0.18;--s:0.72;--d:1.4"></span>
+      <span style="--x:53;--h:17;--o:0.14;--s:0.82;--d:0.2"></span>
+      <span style="--x:58;--h:22;--o:0.16;--s:0.76;--d:1.0"></span>
+      <span style="--x:65;--h:20;--o:0.15;--s:0.85;--d:0.6"></span>
+      <span style="--x:73;--h:18;--o:0.13;--s:0.92;--d:1.6"></span>
+      <span style="--x:80;--h:24;--o:0.17;--s:0.74;--d:0.3"></span>
+      <span style="--x:85;--h:19;--o:0.14;--s:0.88;--d:1.1"></span>
+      <span style="--x:92;--h:21;--o:0.16;--s:0.8;--d:0.8"></span>
+      <span style="--x:98;--h:17;--o:0.13;--s:0.86;--d:1.5"></span>
+      <!-- Background — slow, small, faint -->
+      <span style="--x:4;--h:12;--o:0.08;--s:1.1;--d:0.3"></span>
+      <span style="--x:10;--h:14;--o:0.1;--s:1.05;--d:1.0"></span>
+      <span style="--x:17;--h:11;--o:0.07;--s:1.2;--d:0.6"></span>
+      <span style="--x:26;--h:15;--o:0.09;--s:1.15;--d:1.4"></span>
+      <span style="--x:35;--h:13;--o:0.08;--s:1.3;--d:0.2"></span>
+      <span style="--x:42;--h:10;--o:0.06;--s:1.25;--d:0.9"></span>
+      <span style="--x:50;--h:14;--o:0.09;--s:1.1;--d:1.7"></span>
+      <span style="--x:57;--h:12;--o:0.07;--s:1.35;--d:0.5"></span>
+      <span style="--x:66;--h:16;--o:0.1;--s:1.08;--d:1.2"></span>
+      <span style="--x:74;--h:11;--o:0.06;--s:1.4;--d:0.1"></span>
+      <span style="--x:83;--h:15;--o:0.09;--s:1.12;--d:0.8"></span>
+      <span style="--x:90;--h:13;--o:0.08;--s:1.28;--d:1.6"></span>
+      <span style="--x:97;--h:10;--o:0.07;--s:1.18;--d:0.4"></span>
+    </div>
+    <div class="water" aria-hidden="true"></div>
+    <div class="hero-content content">
+      <img src="icon.png" alt="Splash Screen app icon" class="app-icon" width="72" height="72">
+      <h1>It rains on your desktop now.</h1>
+      <p class="subtitle">A menu bar app for macOS. Rain falls, water pools at the bottom, fish show up, and there's a submarine if you drain it.</p>
+      <a href="https://apps.apple.com/us/app/splash-screen-rain/id6760953685" class="cta">Download for macOS</a>
+    </div>
+  </section>
+
+  <!-- Dial it in -->
+  <section class="section">
+    <div class="content">
+      <h2>Dial it in</h2>
+      <p>Slide the intensity from a quiet drizzle to a full storm. Past 60%, lightning starts. Water rises from the bottom of your screen. Fish appear once there's enough depth&thinsp;&mdash;&thinsp;five color varieties, up to twelve at a time, each swimming at their own pace.</p>
+      <p>The overlay sits on top of your windows but everything underneath stays clickable. Rain on your screen, work as usual.</p>
+    </div>
+  </section>
+
+  <!-- Then drain it -->
+  <section class="section">
+    <div class="content">
+      <h2>Then drain it</h2>
+      <p>Hit the drain button. A submarine glides in from the left, fires a torpedo straight at your screen. It cracks. Water rushes through the fractures, glass shards scatter, and everything goes quiet.</p>
+      <p>Two seconds later the rain starts again. This feature serves no practical purpose. That's the point.</p>
+    </div>
+  </section>
+
+  <!-- The details -->
+  <section class="section">
+    <div class="content">
+      <h2>The details</h2>
+      <ul class="features">
+        <li>Sits in your menu bar&thinsp;&mdash;&thinsp;no dock icon, no windows to manage</li>
+        <li>Full click-through overlay&thinsp;&mdash;&thinsp;use your Mac normally underneath</li>
+        <li>Single slider for rain intensity</li>
+        <li>Toggle water level and fish independently</li>
+        <li>Auto-hides when you take a screenshot</li>
+        <li>Remembers your settings between launches</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="content">
+      <p>Available on the Mac App Store.</p>
+      <a href="https://apps.apple.com/us/app/splash-screen-rain/id6760953685" class="cta">Download Splash Screen</a>
+      <p class="colophon">&copy; Splash Screen</p>
+    </div>
+  </footer>
+
+</body>
+</html>
