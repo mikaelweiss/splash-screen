@@ -15,7 +15,7 @@ class RainSettings: ObservableObject {
     @Published var intensity: CGFloat {
         didSet { UserDefaults.standard.set(Double(intensity), forKey: "rainIntensity") }
     }
-    @Published var drainRequested: Bool = false
+    @Published var drainGeneration: Int = 0
     @Published var fishEnabled: Bool {
         didSet { UserDefaults.standard.set(fishEnabled, forKey: "fishEnabled") }
     }
@@ -47,7 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     var statusItem: NSStatusItem?
     var popover: NSPopover?
-    var overlayWindow: NSWindow?
+    var overlayWindows: [NSScreen: NSWindow] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -68,9 +68,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(rootView: MenuBarView())
         self.popover = popover
 
-        // Create overlay window programmatically so it's always fullscreen & borderless
-        guard let screen = NSScreen.main else { return }
+        // Create one overlay window per screen
+        for screen in NSScreen.screens {
+            createOverlayWindow(for: screen)
+        }
 
+        startScreenshotMonitoring()
+        startScreenChangeMonitoring()
+    }
+
+    private func createOverlayWindow(for screen: NSScreen) {
         let window = NSWindow(
             contentRect: screen.frame,
             styleMask: [.borderless],
@@ -87,10 +94,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         window.ignoresMouseEvents = true
         window.sharingType = .none
         window.orderFrontRegardless()
-        self.overlayWindow = window
-
-        startScreenshotMonitoring()
-        startScreenChangeMonitoring()
+        overlayWindows[screen] = window
     }
 
     // MARK: - Screenshot Detection
@@ -104,10 +108,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let screenshotActive = self.isScreenshotUIRunning()
             if screenshotActive && !self.wasHiddenForScreenshot {
                 self.wasHiddenForScreenshot = true
-                self.overlayWindow?.orderOut(nil)
+                for window in self.overlayWindows.values {
+                    window.orderOut(nil)
+                }
             } else if !screenshotActive && self.wasHiddenForScreenshot {
                 self.wasHiddenForScreenshot = false
-                self.overlayWindow?.orderFrontRegardless()
+                for window in self.overlayWindows.values {
+                    window.orderFrontRegardless()
+                }
             }
         }
     }
@@ -124,8 +132,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     @objc private func screenParametersChanged() {
-        guard let screen = NSScreen.main else { return }
-        overlayWindow?.setFrame(screen.frame, display: true)
+        let currentScreens = Set(NSScreen.screens)
+
+        // Remove windows for disconnected screens
+        for screen in overlayWindows.keys where !currentScreens.contains(screen) {
+            overlayWindows[screen]?.orderOut(nil)
+            overlayWindows.removeValue(forKey: screen)
+        }
+
+        // Add windows for new screens, resize existing ones
+        for screen in currentScreens {
+            if let window = overlayWindows[screen] {
+                window.setFrame(screen.frame, display: true)
+            } else {
+                createOverlayWindow(for: screen)
+            }
+        }
     }
 
     private func isScreenshotUIRunning() -> Bool {
@@ -169,7 +191,7 @@ struct MenuBarView: View {
 
             HStack {
                 Button("Drain") {
-                    settings.drainRequested = true
+                    settings.drainGeneration += 1
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.blue)

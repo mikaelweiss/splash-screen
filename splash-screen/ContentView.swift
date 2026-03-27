@@ -935,6 +935,7 @@ struct ContentView: View {
 
 struct RainView: View {
     @State private var rain = RainSystem()
+    @State private var lastDrainGeneration = 0
 
     private let rainColor = Color(red: 0.7, green: 0.8, blue: 0.95)
     private let splashColor = Color(red: 0.65, green: 0.75, blue: 0.9)
@@ -945,8 +946,9 @@ struct RainView: View {
                 rain.intensity = RainSettings.shared.intensity
                 rain.fishEnabled = RainSettings.shared.fishEnabled
                 rain.waterLevelEnabled = RainSettings.shared.waterLevelEnabled
-                if RainSettings.shared.drainRequested {
-                    RainSettings.shared.drainRequested = false
+                let currentDrain = RainSettings.shared.drainGeneration
+                if currentDrain != lastDrainGeneration {
+                    lastDrainGeneration = currentDrain
                     rain.startDrainSequence()
                 }
                 rain.update(date: timeline.date, size: size)
