@@ -935,7 +935,7 @@ struct ContentView: View {
 
 struct RainView: View {
     @State private var rain = RainSystem()
-    @State private var lastDrainGeneration = 0
+    @ObservedObject private var settings = RainSettings.shared
 
     private let rainColor = Color(red: 0.7, green: 0.8, blue: 0.95)
     private let splashColor = Color(red: 0.65, green: 0.75, blue: 0.9)
@@ -943,14 +943,6 @@ struct RainView: View {
     var body: some View {
         TimelineView(.animation) { timeline in
             Canvas { context, size in
-                rain.intensity = RainSettings.shared.intensity
-                rain.fishEnabled = RainSettings.shared.fishEnabled
-                rain.waterLevelEnabled = RainSettings.shared.waterLevelEnabled
-                let currentDrain = RainSettings.shared.drainGeneration
-                if currentDrain != lastDrainGeneration {
-                    lastDrainGeneration = currentDrain
-                    rain.startDrainSequence()
-                }
                 rain.update(date: timeline.date, size: size)
 
                 // Apply screen shake
@@ -972,6 +964,23 @@ struct RainView: View {
                 drawLightningOverlay(in: &context, size: size)
                 drawImpactFlash(in: &context, size: size)
             }
+        }
+        .onAppear {
+            rain.intensity = settings.intensity
+            rain.fishEnabled = settings.fishEnabled
+            rain.waterLevelEnabled = settings.waterLevelEnabled
+        }
+        .onChange(of: settings.intensity) { _, newValue in
+            rain.intensity = newValue
+        }
+        .onChange(of: settings.fishEnabled) { _, newValue in
+            rain.fishEnabled = newValue
+        }
+        .onChange(of: settings.waterLevelEnabled) { _, newValue in
+            rain.waterLevelEnabled = newValue
+        }
+        .onChange(of: settings.drainGeneration) { _, _ in
+            rain.startDrainSequence()
         }
     }
 
