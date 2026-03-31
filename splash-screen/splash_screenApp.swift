@@ -41,16 +41,16 @@ struct splash_screenApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        Settings {
+            EmptyView()
         }
-        .windowStyle(.hiddenTitleBar)
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
+    var overlayWindows: [NSWindow] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -71,20 +71,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(rootView: MenuBarView())
         self.popover = popover
 
-        // Configure overlay window
-        DispatchQueue.main.async {
-            guard let window = NSApplication.shared.windows.first,
-                  let screen = NSScreen.main else { return }
+        // Create overlay windows directly — one per screen
+        createOverlayWindows()
 
-            window.styleMask = [.borderless]
-            window.setFrame(screen.frame, display: true)
+        // Recreate overlays when monitors change
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screensChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+    }
+
+    func createOverlayWindows() {
+        overlayWindows.forEach { $0.orderOut(nil) }
+        overlayWindows.removeAll()
+
+        for screen in NSScreen.screens {
+            let window = NSWindow(
+                contentRect: screen.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
             window.isOpaque = false
             window.backgroundColor = .clear
             window.hasShadow = false
             window.level = .screenSaver
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             window.ignoresMouseEvents = true
+            window.canHide = false
+            window.contentView = NSHostingView(rootView: ContentView())
+            window.orderFrontRegardless()
+
+            overlayWindows.append(window)
         }
+    }
+
+    @objc func screensChanged() {
+        createOverlayWindows()
     }
 
     @objc func togglePopover() {
