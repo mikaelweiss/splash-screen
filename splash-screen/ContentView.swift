@@ -101,10 +101,7 @@ struct Fish {
     var targetY: CGFloat
     var targetTimer: CGFloat // time until picking new target
     var phaseOffset: CGFloat // for vertical bobbing desync
-    var hue: CGFloat         // fish color hue (0-1)
-    var saturation: CGFloat
-    var brightness: CGFloat
-    var bellyBrightness: CGFloat
+    var look: FishLook
 }
 
 // MARK: - Rain System
@@ -368,14 +365,6 @@ final class RainSystem {
         let maxY = waterTop + waterDepth * 0.85
         let y = CGFloat.random(in: minY...maxY)
 
-        let hue = [
-            CGFloat.random(in: 0.05...0.12),   // orange/gold
-            CGFloat.random(in: 0.55...0.62),    // blue
-            CGFloat.random(in: 0.30...0.38),    // green/teal
-            CGFloat.random(in: 0.0...0.03),     // red
-            CGFloat.random(in: 0.08...0.15),    // yellow-orange
-        ].randomElement()!
-
         let size = CGFloat.random(in: 14...30)
         let speed = (0.03 + CGFloat.random(in: 0...0.04)) * (28.0 / size) // smaller fish faster
 
@@ -391,10 +380,7 @@ final class RainSystem {
             targetY: CGFloat.random(in: minY...maxY),
             targetTimer: CGFloat.random(in: 2.0...5.0),
             phaseOffset: CGFloat.random(in: 0...(.pi * 2)),
-            hue: hue,
-            saturation: CGFloat.random(in: 0.5...0.8),
-            brightness: CGFloat.random(in: 0.45...0.65),
-            bellyBrightness: CGFloat.random(in: 0.75...0.90)
+            look: FishLook.random()
         )
     }
 
@@ -1165,15 +1151,13 @@ struct RainView: View {
         for fish in rain.fish {
             let px = fish.x * size.width
             let py = fish.y * size.height
-            let s = fish.size
 
-            // Depth-based opacity: fish deeper in water are slightly more transparent
+            // Deeper fish fade slightly, and FishRenderer tints them toward the water color
             let waterTop = rain.waterSurfaceNormalized
-            let depthInWater = (fish.y - waterTop) / (1.0 - waterTop)
-            let depthOpacity = 0.5 + 0.5 * (1.0 - min(depthInWater, 1.0))
+            let depthInWater = min(max((fish.y - waterTop) / max(1.0 - waterTop, 0.001), 0), 1)
 
             var ctx = context
-            ctx.opacity = Double(depthOpacity)
+            ctx.opacity = Double(1.0 - 0.2 * depthInWater)
 
             // Transform: translate to fish position, rotate to heading
             ctx.translateBy(x: px, y: py)
@@ -1185,137 +1169,7 @@ struct RainView: View {
                 ctx.scaleBy(x: 1, y: -1)
             }
 
-            // -- Tail (drawn first, behind body) --
-            let tailWag = sin(fish.swimPhase) * 0.35
-            var tailCtx = ctx
-            tailCtx.translateBy(x: -s * 0.45, y: 0)
-            tailCtx.rotate(by: .radians(Double(tailWag)))
-
-            let tailSpread = s * 0.35
-            let tailLength = s * 0.25
-            var tailPath = Path()
-            tailPath.move(to: .zero)
-            tailPath.addLine(to: CGPoint(x: -tailLength, y: -tailSpread))
-            tailPath.addQuadCurve(
-                to: CGPoint(x: -tailLength, y: tailSpread),
-                control: CGPoint(x: -tailLength * 0.4, y: 0)
-            )
-            tailPath.closeSubpath()
-
-            let tailColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation * 0.9), brightness: Double(fish.brightness * 0.85))
-            tailCtx.fill(tailPath, with: .color(tailColor))
-            tailCtx.opacity = Double(depthOpacity) * 0.4
-            tailCtx.stroke(tailPath, with: .color(Color(hue: Double(fish.hue), saturation: Double(fish.saturation), brightness: Double(fish.brightness * 0.5))), style: StrokeStyle(lineWidth: 0.5))
-
-            // -- Dorsal fin (on top of body, subtle wave) --
-            let finWag = sin(fish.swimPhase * 0.6 + 1.0) * 0.12
-            var finCtx = ctx
-            finCtx.translateBy(x: s * 0.05, y: -s * 0.18)
-            finCtx.rotate(by: .radians(Double(finWag)))
-
-            var dorsalPath = Path()
-            dorsalPath.move(to: CGPoint(x: -s * 0.12, y: 0))
-            dorsalPath.addQuadCurve(
-                to: CGPoint(x: s * 0.12, y: 0),
-                control: CGPoint(x: 0, y: -s * 0.18)
-            )
-            dorsalPath.closeSubpath()
-
-            let finColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation * 0.7), brightness: Double(fish.brightness * 0.75), opacity: 0.7)
-            finCtx.fill(dorsalPath, with: .color(finColor))
-
-            // -- Pectoral fin (small, below and behind head) --
-            let pectoralWag = sin(fish.swimPhase * 0.8 + 2.0) * 0.15
-            var pecCtx = ctx
-            pecCtx.translateBy(x: s * 0.1, y: s * 0.12)
-            pecCtx.rotate(by: .radians(Double(pectoralWag)))
-
-            var pectoralPath = Path()
-            pectoralPath.move(to: .zero)
-            pectoralPath.addQuadCurve(
-                to: CGPoint(x: -s * 0.14, y: s * 0.08),
-                control: CGPoint(x: -s * 0.02, y: s * 0.12)
-            )
-            pectoralPath.addLine(to: .zero)
-            pectoralPath.closeSubpath()
-
-            pecCtx.opacity = Double(depthOpacity) * 0.6
-            pecCtx.fill(pectoralPath, with: .color(finColor))
-
-            // -- Body (2 cubic bezier curves forming a fish shape) --
-            let bodyW = s * 0.9
-            let bodyH = s * 0.38
-
-            // Slight body undulation: middle of body sways opposite to tail
-            let bodyWag = sin(fish.swimPhase - 0.5) * s * 0.015
-
-            var bodyPath = Path()
-            // Start at nose
-            let nose = CGPoint(x: bodyW * 0.5, y: 0)
-            bodyPath.move(to: nose)
-
-            // Top curve: nose -> tail
-            bodyPath.addCurve(
-                to: CGPoint(x: -bodyW * 0.4, y: bodyWag * 0.5),
-                control1: CGPoint(x: bodyW * 0.3, y: -bodyH * 0.9),
-                control2: CGPoint(x: -bodyW * 0.1, y: -bodyH * 0.5 + bodyWag)
-            )
-
-            // Bottom curve: tail -> nose
-            bodyPath.addCurve(
-                to: nose,
-                control1: CGPoint(x: -bodyW * 0.1, y: bodyH * 0.5 + bodyWag),
-                control2: CGPoint(x: bodyW * 0.3, y: bodyH * 0.9)
-            )
-            bodyPath.closeSubpath()
-
-            // Gradient fill: dark back, light belly
-            let topColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation), brightness: Double(fish.brightness))
-            let bellyColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation * 0.3), brightness: Double(fish.bellyBrightness))
-
-            ctx.fill(bodyPath, with: .linearGradient(
-                Gradient(colors: [topColor, bellyColor]),
-                startPoint: CGPoint(x: 0, y: -bodyH),
-                endPoint: CGPoint(x: 0, y: bodyH)
-            ))
-
-            // Body outline (subtle)
-            let outlineColor = Color(hue: Double(fish.hue), saturation: Double(fish.saturation), brightness: Double(fish.brightness * 0.4))
-            var outCtx = ctx
-            outCtx.opacity = Double(depthOpacity) * 0.35
-            outCtx.stroke(bodyPath, with: .color(outlineColor), style: StrokeStyle(lineWidth: 0.7))
-
-            // -- Eye --
-            let eyeX = bodyW * 0.28
-            let eyeY: CGFloat = -bodyH * 0.08
-            let eyeR = s * 0.04
-
-            // White of eye
-            ctx.fill(
-                Path(ellipseIn: CGRect(x: eyeX - eyeR * 1.3, y: eyeY - eyeR * 1.3, width: eyeR * 2.6, height: eyeR * 2.6)),
-                with: .color(Color(white: 0.95, opacity: 0.8))
-            )
-
-            // Pupil
-            var eyeCtx = ctx
-            eyeCtx.opacity = 1.0
-            eyeCtx.fill(
-                Path(ellipseIn: CGRect(x: eyeX - eyeR, y: eyeY - eyeR, width: eyeR * 2, height: eyeR * 2)),
-                with: .color(Color(white: 0.05))
-            )
-
-            // Eye specular highlight
-            let specR = eyeR * 0.45
-            eyeCtx.fill(
-                Path(ellipseIn: CGRect(x: eyeX - eyeR * 0.4 - specR / 2, y: eyeY - eyeR * 0.4 - specR / 2, width: specR, height: specR)),
-                with: .color(Color(white: 1.0, opacity: 0.9))
-            )
-
-            // -- Specular body highlight (near head, top) --
-            var hlCtx = ctx
-            hlCtx.opacity = Double(depthOpacity) * 0.15
-            let hlRect = CGRect(x: bodyW * 0.05, y: -bodyH * 0.55, width: bodyW * 0.3, height: bodyH * 0.3)
-            hlCtx.fill(Path(ellipseIn: hlRect), with: .color(.white))
+            FishRenderer.draw(fish, in: ctx, depth: depthInWater)
         }
     }
 
