@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 enum FoodPhase {
@@ -251,6 +252,8 @@ final class FoodTank {
 final class FoodSystem {
     static let shared = FoodSystem()
 
+    let foodDropped = PassthroughSubject<CGDirectDisplayID, Never>()
+
     private var tanks: [CGDirectDisplayID: FoodTank] = [:]
 
     func tank(for screenID: CGDirectDisplayID) -> FoodTank {
@@ -270,6 +273,7 @@ final class FoodSystem {
             y: (frame.maxY - point.y) / frame.height
         )
         tank(for: screenID).dropCluster(atNormalized: normalized, screenSize: frame.size)
+        foodDropped.send(screenID)
     }
 }
 

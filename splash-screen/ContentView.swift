@@ -225,6 +225,8 @@ final class RainSystem {
             && ripples.isEmpty
             && fish.isEmpty
             && bolt == nil
+            && food.flakes.isEmpty
+            && food.nibbles.isEmpty
             && impactFlash <= 0.01
             && (drainPhase == .idle || drainPhase == .done)
     }
@@ -1216,6 +1218,9 @@ struct RainView: View {
             rain.waterLevelEnabled = settings.waterLevelEnabled
         }
         .onReceive(settings.objectWillChange) { _ in
+            isPaused = false
+        }
+        .onReceive(FoodSystem.shared.foodDropped.filter { $0 == screenID }) { _ in
             isPaused = false
         }
         .onChange(of: settings.intensity) { _, newValue in
