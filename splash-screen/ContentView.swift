@@ -526,8 +526,8 @@ final class RainSystem {
         let waterTop = waterSurfaceNormalized
         let waterDepth = 1.0 - waterTop
 
-        // Remove fish when disabled
-        if !fishEnabled {
+        // Remove fish when they or the water are disabled
+        if !fishEnabled || !waterLevelEnabled {
             fish.removeAll()
             return
         }
