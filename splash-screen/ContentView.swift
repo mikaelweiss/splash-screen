@@ -36,6 +36,48 @@ struct Ripple {
     var maxRadius: CGFloat
 }
 
+// MARK: - Lightning Models
+
+struct BoltStroke {
+    var path: Path
+    var width: CGFloat
+    var brightness: Double
+    var isBranch: Bool
+}
+
+struct LightningPulse {
+    var time: CGFloat
+    var peak: CGFloat
+}
+
+struct LightningBolt {
+    var strokes: [BoltStroke]
+    var start: CGPoint
+    var end: CGPoint
+    var strikesWater: Bool
+    var pulses: [LightningPulse]
+    var strength: CGFloat
+    var age: CGFloat = 0
+
+    private let decay: CGFloat = 0.07
+
+    var glow: CGFloat { brightness(includeRestrikes: true) }
+
+    // Restrikes follow the main channel, so branches only light on the first pulse.
+    var branchGlow: CGFloat { brightness(includeRestrikes: false) }
+
+    var isFinished: Bool { age > (pulses.last?.time ?? 0) + decay * 5 }
+
+    private func brightness(includeRestrikes: Bool) -> CGFloat {
+        var value: CGFloat = 0
+        for (i, pulse) in pulses.enumerated() where age >= pulse.time {
+            if i > 0 && !includeRestrikes { break }
+            value = max(value, pulse.peak * exp(-(age - pulse.time) / decay))
+        }
+        return value * strength
+    }
+}
+
 // MARK: - Drain Sequence Models
 
 enum DrainPhase {
@@ -116,6 +158,8 @@ final class RainSystem {
 
     // Lightning
     var lightningFlash: CGFloat = 0
+    var lightningX: CGFloat = 0.5
+    var bolt: LightningBolt?
     private var lightningTimer: CGFloat = 6.0
 
     // Water pooling
@@ -173,7 +217,7 @@ final class RainSystem {
             && splashes.isEmpty
             && ripples.isEmpty
             && fish.isEmpty
-            && lightningFlash <= 0
+            && bolt == nil
             && impactFlash <= 0.01
             && (drainPhase == .idle || drainPhase == .done)
     }
@@ -222,7 +266,7 @@ final class RainSystem {
         lastUpdate = date
 
         updateWater(dt: dt)
-        updateLightning(dt: dt)
+        updateLightning(dt: dt, size: size)
         updateDrops(dt: dt, size: size)
         updateSplashes(dt: dt, size: size)
         updateRipples(dt: dt)
@@ -254,11 +298,12 @@ final class RainSystem {
         return baseY + CGFloat(wave1 + wave2)
     }
 
-    private func updateLightning(dt: CGFloat) {
-        if lightningFlash > 0 {
-            lightningFlash -= dt * 3.0
-            if lightningFlash < 0 { lightningFlash = 0 }
+    private func updateLightning(dt: CGFloat, size: CGSize) {
+        if var current = bolt {
+            current.age += dt
+            bolt = current.isFinished ? nil : current
         }
+        lightningFlash = bolt?.glow ?? 0
 
         guard intensity > 0.6 else {
             lightningTimer = 2.0
@@ -268,11 +313,91 @@ final class RainSystem {
         lightningTimer -= dt
         if lightningTimer <= 0 {
             let stormFactor = (intensity - 0.6) / 0.4
-            lightningFlash = CGFloat.random(in: 0.4...0.6) + stormFactor * 0.4
-            let maxInterval = 14.0 - stormFactor * 11.0
-            let minInterval = 6.0 - stormFactor * 4.5
+            let strength = min(CGFloat.random(in: 0.6...0.8) + stormFactor * 0.2, 1.0)
+            bolt = makeBolt(size: size, strength: strength)
+            let maxInterval = 16.0 - stormFactor * 8.0
+            let minInterval = 8.0 - stormFactor * 4.0
             lightningTimer = CGFloat.random(in: minInterval...maxInterval)
         }
+    }
+
+    func lightningLight(nx: CGFloat) -> CGFloat {
+        guard lightningFlash > 0.01 else { return 0 }
+        return lightningFlash * max(0, 1.0 - abs(nx - lightningX) / 0.35)
+    }
+
+    private func makeBolt(size: CGSize, strength: CGFloat) -> LightningBolt {
+        let startX = CGFloat.random(in: 0.12...0.88) * size.width
+        let start = CGPoint(x: startX, y: -size.height * 0.02)
+        let endX = startX + CGFloat.random(in: -0.12...0.12) * size.height
+        let strikesWater = waterLevel > 0.03
+        let endY = strikesWater
+            ? waterSurfaceY(atScreenX: endX, screenHeight: size.height)
+            : CGFloat.random(in: 0.4...0.65) * size.height
+        let end = CGPoint(x: endX, y: endY)
+
+        let channel = displacedLine(from: start, to: end, roughness: 0.16, iterations: 6)
+        var strokes = [BoltStroke(path: polyline(channel), width: 1.8, brightness: 1.0, isBranch: false)]
+        addBranches(along: channel, depth: 0, width: 1.8, brightness: 1.0, into: &strokes)
+
+        var pulses = [LightningPulse(time: 0, peak: 1.0)]
+        let restrike = CGFloat.random(in: 0.10...0.16)
+        pulses.append(LightningPulse(time: restrike, peak: CGFloat.random(in: 0.55...0.85)))
+        if Bool.random() {
+            pulses.append(LightningPulse(time: restrike + CGFloat.random(in: 0.08...0.14), peak: CGFloat.random(in: 0.35...0.6)))
+        }
+
+        lightningX = (start.x + end.x) / 2 / size.width
+        return LightningBolt(strokes: strokes, start: start, end: end, strikesWater: strikesWater, pulses: pulses, strength: strength)
+    }
+
+    private func addBranches(along points: [CGPoint], depth: Int, width: CGFloat, brightness: Double, into strokes: inout [BoltStroke]) {
+        guard depth < 2, points.count > 8, let tipOfParent = points.last else { return }
+        let count = depth == 0 ? Int.random(in: 2...4) : Int.random(in: 0...1)
+        for _ in 0..<count {
+            let index = Int.random(in: points.count / 8 ..< points.count * 3 / 4)
+            let origin = points[index]
+            let ahead = points[min(index + 4, points.count - 1)]
+            let turn = CGFloat.random(in: 0.35...0.8) * (Bool.random() ? 1 : -1)
+            let heading = atan2(ahead.y - origin.y, ahead.x - origin.x) + turn
+            let length = hypot(tipOfParent.x - origin.x, tipOfParent.y - origin.y) * CGFloat.random(in: 0.25...0.5)
+            let tip = CGPoint(x: origin.x + cos(heading) * length, y: origin.y + sin(heading) * length)
+
+            let branch = displacedLine(from: origin, to: tip, roughness: 0.22, iterations: 4)
+            let branchWidth = width * 0.55
+            let branchBrightness = brightness * 0.55
+            strokes.append(BoltStroke(path: polyline(branch), width: branchWidth, brightness: branchBrightness, isBranch: true))
+            addBranches(along: branch, depth: depth + 1, width: branchWidth, brightness: branchBrightness, into: &strokes)
+        }
+    }
+
+    private func displacedLine(from a: CGPoint, to b: CGPoint, roughness: CGFloat, iterations: Int) -> [CGPoint] {
+        var points = [a, b]
+        var offset = hypot(b.x - a.x, b.y - a.y) * roughness
+        for _ in 0..<iterations {
+            var next: [CGPoint] = []
+            next.reserveCapacity(points.count * 2)
+            for i in 0..<points.count - 1 {
+                let p = points[i]
+                let q = points[i + 1]
+                let dx = q.x - p.x
+                let dy = q.y - p.y
+                let len = max(hypot(dx, dy), 0.001)
+                let shift = CGFloat.random(in: -offset...offset)
+                next.append(p)
+                next.append(CGPoint(x: (p.x + q.x) / 2 - dy / len * shift, y: (p.y + q.y) / 2 + dx / len * shift))
+            }
+            next.append(points[points.count - 1])
+            points = next
+            offset *= 0.56
+        }
+        return points
+    }
+
+    private func polyline(_ points: [CGPoint]) -> Path {
+        var path = Path()
+        path.addLines(points)
+        return path
     }
 
     private func updateDrops(dt: CGFloat, size: CGSize) {
@@ -946,6 +1071,9 @@ struct RainView: View {
     @ObservedObject private var settings = RainSettings.shared
     @State private var isPaused = false
 
+    private let lightningGlowColor = Color(red: 0.72, green: 0.78, blue: 1.0)
+    private let lightningCoreColor = Color(red: 0.96, green: 0.97, blue: 1.0)
+
     private var fishBehindWindows: Bool {
         settings.fishEnabled && !settings.fishInFront
     }
@@ -981,6 +1109,7 @@ struct RainView: View {
                 }
 
                 drawRainDrops(in: &context, size: size)
+                drawLightningBolt(in: &context)
                 drawSubmarine(in: &context, size: size)
                 drawWater(in: &context, size: size)
                 if fishInFront {
@@ -993,7 +1122,7 @@ struct RainView: View {
                 drawShards(in: &context, size: size)
                 drawDrainParticles(in: &context)
                 drawDebris(in: &context, size: size)
-                drawLightningOverlay(in: &context, size: size)
+                drawLightningGlow(in: &context, size: size)
                 drawImpactFlash(in: &context, size: size)
             }
         }
@@ -1036,7 +1165,7 @@ struct RainView: View {
 
             let lightBoost = rain.lightIntensity(nx: drop.x, ny: drop.y)
             let litOpacity = drop.baseOpacity + Double(lightBoost) * 0.45
-            let flashBoost = Double(rain.lightningFlash) * 0.3
+            let flashBoost = Double(rain.lightningLight(nx: drop.x)) * 0.3
             let finalOpacity = min(litOpacity + flashBoost, 0.85)
 
             // A filled stadium matches a round-capped stroke but skips per-drop stroke tessellation.
@@ -1173,15 +1302,61 @@ struct RainView: View {
         }
     }
 
-    private func drawLightningOverlay(in context: inout GraphicsContext, size: CGSize) {
-        guard rain.lightningFlash > 0.01 else { return }
+    private func drawLightningBolt(in context: inout GraphicsContext) {
+        guard let bolt = rain.bolt else { return }
+        let glow = Double(bolt.glow)
+        let branchGlow = Double(bolt.branchGlow)
+        guard glow > 0.01 else { return }
 
-        let alpha = Double(rain.lightningFlash * rain.lightningFlash) * 0.15
+        let layers: [(widthScale: CGFloat, opacity: Double, color: Color)] = [
+            (9.0, 0.05, lightningGlowColor),
+            (4.5, 0.10, lightningGlowColor),
+            (2.2, 0.30, lightningGlowColor),
+            (1.0, 0.90, lightningCoreColor),
+        ]
+        for stroke in bolt.strokes {
+            let level = (stroke.isBranch ? branchGlow : glow) * stroke.brightness
+            guard level > 0.01 else { continue }
+            for layer in layers {
+                var ctx = context
+                ctx.opacity = level * layer.opacity
+                ctx.stroke(
+                    stroke.path,
+                    with: .color(layer.color),
+                    style: StrokeStyle(lineWidth: stroke.width * layer.widthScale, lineCap: .round, lineJoin: .round)
+                )
+            }
+        }
+    }
+
+    private func drawLightningGlow(in context: inout GraphicsContext, size: CGSize) {
+        guard let bolt = rain.bolt else { return }
+        let glow = Double(bolt.glow)
+        guard glow > 0.01 else { return }
+
+        let span = max(size.width, size.height)
+        fillLightningGlow(in: &context, center: bolt.start, radius: span * 0.22, opacity: glow * 0.14)
+
+        let mid = CGPoint(x: (bolt.start.x + bolt.end.x) / 2, y: (bolt.start.y + bolt.end.y) / 2)
+        let length = hypot(bolt.end.x - bolt.start.x, bolt.end.y - bolt.start.y)
+        fillLightningGlow(in: &context, center: mid, radius: length * 0.6, opacity: glow * 0.06)
+
+        if bolt.strikesWater {
+            fillLightningGlow(in: &context, center: bolt.end, radius: size.height * 0.12, opacity: glow * 0.12)
+        }
+    }
+
+    private func fillLightningGlow(in context: inout GraphicsContext, center: CGPoint, radius: CGFloat, opacity: Double) {
+        let gradient = Gradient(stops: [
+            .init(color: lightningGlowColor, location: 0),
+            .init(color: lightningGlowColor.opacity(0.35), location: 0.4),
+            .init(color: lightningGlowColor.opacity(0), location: 1.0),
+        ])
         var ctx = context
-        ctx.opacity = alpha
+        ctx.opacity = opacity
         ctx.fill(
-            Path(CGRect(origin: .zero, size: size)),
-            with: .color(Color(red: 0.7, green: 0.75, blue: 0.9))
+            Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
+            with: .radialGradient(gradient, center: center, startRadius: 0, endRadius: radius)
         )
     }
 
