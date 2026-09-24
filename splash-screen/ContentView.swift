@@ -1189,7 +1189,7 @@ struct RainView: View {
 
                 if layer == .fish {
                     if fishBehindWindows {
-                        drawFishAndFood(in: &context, size: size)
+                        drawFish(in: &context, size: size)
                     }
                     return
                 }
@@ -1198,9 +1198,12 @@ struct RainView: View {
                 drawLightningBolt(in: &context)
                 drawSubmarine(in: &context, size: size)
                 drawWater(in: &context, size: size)
+                // Food stays in front of app windows so a drop is seen falling, floating, and sinking
+                rain.food.drawFlakes(in: &context, size: size)
                 if !fishBehindWindows {
-                    drawFishAndFood(in: &context, size: size)
+                    drawFish(in: &context, size: size)
                 }
+                rain.food.drawNibbles(in: &context, size: size)
                 drawTorpedo(in: &context, size: size)
                 drawRipples(in: &context, size: size)
                 drawSplashes(in: &context)
@@ -1362,12 +1365,6 @@ struct RainView: View {
     }
 
     // MARK: - Fish Drawing
-
-    private func drawFishAndFood(in context: inout GraphicsContext, size: CGSize) {
-        rain.food.drawFlakes(in: &context, size: size)
-        drawFish(in: &context, size: size)
-        rain.food.drawNibbles(in: &context, size: size)
-    }
 
     private func drawFish(in context: inout GraphicsContext, size: CGSize) {
         guard !rain.fish.isEmpty else { return }
