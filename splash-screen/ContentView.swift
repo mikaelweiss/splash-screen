@@ -144,6 +144,10 @@ struct Fish {
     var targetTimer: CGFloat // time until picking new target
     var phaseOffset: CGFloat // for vertical bobbing desync
     var look: FishLook
+    var foodID: Int? = nil     // flake this fish is chasing
+    var foodTimer: CGFloat = 0 // time spent eyeing food before committing
+    var reaction: CGFloat = CGFloat.random(in: 0.2...1.0)
+    var boost: CGFloat = 1     // speed multiplier while chasing food
 }
 
 // MARK: - Rain System
@@ -191,6 +195,9 @@ final class RainSystem {
     var fishEnabled: Bool = false
     var waterLevelEnabled: Bool = true
     private let maxFishCount = 12
+    private let foodNoticeRadius: CGFloat = 450
+
+    let food: FoodTank
 
     /// Normalized Y position of the water surface (0 = top, 1 = bottom)
     var waterSurfaceNormalized: CGFloat {
@@ -232,7 +239,8 @@ final class RainSystem {
         0.3 + intensity * 0.7
     }
 
-    init() {
+    init(food: FoodTank) {
+        self.food = food
         drops.reserveCapacity(maxDropCount)
         splashes.reserveCapacity(400)
         ripples.reserveCapacity(100)
@@ -270,7 +278,10 @@ final class RainSystem {
         updateDrops(dt: dt, size: size)
         updateSplashes(dt: dt, size: size)
         updateRipples(dt: dt)
-        updateFish(dt: dt)
+        food.update(date: date, size: size) { x in
+            waterSurfaceY(atScreenX: x * size.width, screenHeight: size.height) / size.height
+        }
+        updateFish(dt: dt, size: size)
         updateDrainSequence(dt: dt, size: size)
     }
 
@@ -509,7 +520,7 @@ final class RainSystem {
         )
     }
 
-    private func updateFish(dt: CGFloat) {
+    private func updateFish(dt: CGFloat, size: CGSize) {
         let waterTop = waterSurfaceNormalized
         let waterDepth = 1.0 - waterTop
 
@@ -552,13 +563,15 @@ final class RainSystem {
         let minY = waterTop + waterDepth * 0.1
         let maxY = waterTop + waterDepth * 0.88
 
+        assignFood(dt: dt, size: size)
+
         for i in fish.indices {
             // Advance swim phase (tail wagging)
             fish[i].swimPhase += dt * fish[i].swimFrequency
 
             // Speed variation (subtle pulsing)
             let speedMod: CGFloat = 0.8 + 0.2 * sin(elapsedTime * 0.5 + fish[i].phaseOffset)
-            let currentSpeed = fish[i].speed * speedMod
+            var currentSpeed = fish[i].speed * speedMod
 
             // Update wandering target
             fish[i].targetTimer -= dt
@@ -568,16 +581,36 @@ final class RainSystem {
                 fish[i].targetTimer = CGFloat.random(in: 2.5...6.0)
             }
 
+            var targetX = fish[i].targetX
+            var targetY = fish[i].targetY
+            var turnSpeed: CGFloat = 1.8
+            var boostGoal: CGFloat = 1
+            let chasedFlake = fish[i].foodID.flatMap { food.flake(id: $0) }
+            if let flake = chasedFlake {
+                targetX = flake.x
+                targetY = flake.y
+                let dist = hypot((flake.x - fish[i].x) * size.width, (flake.y - fish[i].y) * size.height)
+                let closeness = max(0, 1 - dist / 300)
+                boostGoal = 1.3 + 0.5 * closeness
+                turnSpeed = 2.4 + 1.6 * closeness
+            }
+            fish[i].boost += (boostGoal - fish[i].boost) * min(1, dt * 2)
+
             // Steer toward target with smooth turning
-            let targetAngle = atan2(fish[i].targetY - fish[i].y, fish[i].targetX - fish[i].x)
+            let targetAngle = atan2(targetY - fish[i].y, targetX - fish[i].x)
             var angleDiff = targetAngle - fish[i].angle
             // Normalize to -pi...pi
             while angleDiff > .pi { angleDiff -= 2 * .pi }
             while angleDiff < -.pi { angleDiff += 2 * .pi }
 
-            let turnSpeed: CGFloat = 1.8
             let maxTurn = turnSpeed * dt
-            fish[i].angle += max(-maxTurn, min(maxTurn, angleDiff))
+            fish[i].angle += max(-maxTurn, min(maxTurn, angleDiff * min(1, dt * 5)))
+
+            // Slow down while turning toward food so the fish doesn't orbit it
+            if chasedFlake != nil {
+                currentSpeed *= max(0.35, cos(angleDiff))
+            }
+            currentSpeed *= fish[i].boost
 
             // Move forward
             fish[i].x += cos(fish[i].angle) * currentSpeed * dt
@@ -587,12 +620,15 @@ final class RainSystem {
             fish[i].y += sin(elapsedTime * 0.7 + fish[i].phaseOffset) * 0.001 * dt
 
             // Keep fish within water bounds (soft constraint)
-            if fish[i].y < minY {
-                fish[i].y = minY + 0.005
+            // Chasers may reach the surface and bottom. Ease back afterward instead of snapping.
+            if let flake = chasedFlake {
+                fish[i].y = min(max(fish[i].y, waterTop + 0.004), 0.99)
+                eatIfTouching(fishIndex: i, flake: flake, size: size)
+            } else if fish[i].y < minY {
+                fish[i].y += (minY + 0.005 - fish[i].y) * min(1, dt * 3)
                 if fish[i].angle < 0 { fish[i].angle *= 0.8 }
-            }
-            if fish[i].y > maxY {
-                fish[i].y = maxY - 0.005
+            } else if fish[i].y > maxY {
+                fish[i].y += (maxY - 0.005 - fish[i].y) * min(1, dt * 3)
                 if fish[i].angle > 0 { fish[i].angle *= 0.8 }
             }
 
@@ -603,6 +639,53 @@ final class RainSystem {
                 fish[i].targetTimer = 0.5
             }
         }
+    }
+
+    /// Gives hungry fish a flake, weighting by how many fish already chase it so they spread out.
+    private func assignFood(dt: CGFloat, size: CGSize) {
+        let edible = food.flakes.filter(\.isEdible)
+        var claims: [Int: Int] = [:]
+        for i in fish.indices {
+            if let id = fish[i].foodID, edible.contains(where: { $0.id == id }) {
+                claims[id, default: 0] += 1
+            } else {
+                fish[i].foodID = nil
+            }
+        }
+
+        for i in fish.indices where fish[i].foodID == nil {
+            let px = fish[i].x * size.width
+            let py = fish[i].y * size.height
+            var best: (id: Int, cost: CGFloat)?
+            for flake in edible {
+                let dist = hypot(flake.x * size.width - px, flake.y * size.height - py)
+                guard dist < foodNoticeRadius else { continue }
+                let cost = dist * CGFloat(1 + claims[flake.id, default: 0])
+                if cost < best?.cost ?? .infinity {
+                    best = (flake.id, cost)
+                }
+            }
+
+            guard let best else {
+                fish[i].foodTimer = 0
+                continue
+            }
+            fish[i].foodTimer += dt
+            if fish[i].foodTimer >= fish[i].reaction {
+                fish[i].foodID = best.id
+                fish[i].foodTimer = 0
+                claims[best.id, default: 0] += 1
+            }
+        }
+    }
+
+    private func eatIfTouching(fishIndex i: Int, flake: FoodFlake, size: CGSize) {
+        let noseX = fish[i].x * size.width + cos(fish[i].angle) * fish[i].size * 0.45
+        let noseY = fish[i].y * size.height + sin(fish[i].angle) * fish[i].size * 0.45
+        let dist = hypot(flake.x * size.width - noseX, flake.y * size.height - noseY)
+        guard dist < max(6, fish[i].size * 0.35) else { return }
+        food.eat(id: flake.id)
+        fish[i].foodID = nil
     }
 
     func lightIntensity(nx: CGFloat, ny: CGFloat) -> CGFloat {
@@ -1058,9 +1141,10 @@ enum OverlayLayer {
 struct ContentView: View {
     let rain: RainSystem
     let layer: OverlayLayer
+    let screenID: CGDirectDisplayID
 
     var body: some View {
-        RainView(rain: rain, layer: layer)
+        RainView(rain: rain, layer: layer, screenID: screenID)
             .ignoresSafeArea()
     }
 }
@@ -1068,6 +1152,7 @@ struct ContentView: View {
 struct RainView: View {
     let rain: RainSystem
     let layer: OverlayLayer
+    let screenID: CGDirectDisplayID
     @ObservedObject private var settings = RainSettings.shared
     @State private var isPaused = false
 
@@ -1083,7 +1168,6 @@ struct RainView: View {
     }
 
     var body: some View {
-        let fishInFront = settings.fishInFront
         TimelineView(.animation(paused: isPaused)) { timeline in
             Canvas { context, size in
                 // The water window owns the simulation so the shared state advances once per frame
@@ -1102,8 +1186,8 @@ struct RainView: View {
                 }
 
                 if layer == .fish {
-                    if !fishInFront {
-                        drawFish(in: &context, size: size)
+                    if fishBehindWindows {
+                        drawFishAndFood(in: &context, size: size)
                     }
                     return
                 }
@@ -1112,8 +1196,8 @@ struct RainView: View {
                 drawLightningBolt(in: &context)
                 drawSubmarine(in: &context, size: size)
                 drawWater(in: &context, size: size)
-                if fishInFront {
-                    drawFish(in: &context, size: size)
+                if !fishBehindWindows {
+                    drawFishAndFood(in: &context, size: size)
                 }
                 drawTorpedo(in: &context, size: size)
                 drawRipples(in: &context, size: size)
@@ -1273,6 +1357,12 @@ struct RainView: View {
     }
 
     // MARK: - Fish Drawing
+
+    private func drawFishAndFood(in context: inout GraphicsContext, size: CGSize) {
+        rain.food.drawFlakes(in: &context, size: size)
+        drawFish(in: &context, size: size)
+        rain.food.drawNibbles(in: &context, size: size)
+    }
 
     private func drawFish(in context: inout GraphicsContext, size: CGSize) {
         guard !rain.fish.isEmpty else { return }
@@ -1813,5 +1903,5 @@ struct RainView: View {
 }
 
 #Preview {
-    ContentView(rain: RainSystem(), layer: .water)
+    ContentView(rain: RainSystem(food: FoodTank()), layer: .water, screenID: CGMainDisplayID())
 }

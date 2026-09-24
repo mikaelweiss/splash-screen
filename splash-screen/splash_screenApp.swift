@@ -25,6 +25,9 @@ class RainSettings: ObservableObject {
     @Published var fishInFront: Bool {
         didSet { UserDefaults.standard.set(fishInFront, forKey: "fishInFront") }
     }
+    @Published var feedingEnabled: Bool {
+        didSet { UserDefaults.standard.set(feedingEnabled, forKey: "feedingEnabled") }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -37,6 +40,7 @@ class RainSettings: ObservableObject {
             ? defaults.bool(forKey: "waterLevelEnabled")
             : true
         self.fishInFront = defaults.bool(forKey: "fishInFront")
+        self.feedingEnabled = defaults.bool(forKey: "feedingEnabled")
     }
 }
 
@@ -57,6 +61,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var overlayWindows: [NSWindow] = []
     var fishWindows: [NSWindow] = []
     private var fishVisibilityCancellable: AnyCancellable?
+    private var feedingSubscription: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -74,11 +79,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.contentSize = NSSize(width: 280, height: 128)
         popover.behavior = .transient
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: MenuBarView())
+        let menuController = NSHostingController(rootView: MenuBarView())
+        menuController.sizingOptions = .preferredContentSize
+        popover.contentViewController = menuController
         self.popover = popover
 
         // Create overlay windows directly — one per screen
         createOverlayWindows()
+
+        feedingSubscription = RainSettings.shared.$feedingEnabled.sink { enabled in
+            FeedingMonitor.shared.setEnabled(enabled)
+        }
 
         // Recreate overlays when monitors change
         NotificationCenter.default.addObserver(
@@ -104,9 +115,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         let fishLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         for screen in NSScreen.screens {
-            let rain = RainSystem()
-            fishWindows.append(makeOverlayWindow(screen: screen, level: fishLevel, rain: rain, layer: .fish))
-            overlayWindows.append(makeOverlayWindow(screen: screen, level: .screenSaver, rain: rain, layer: .water))
+            let screenID = screen.displayID ?? 0
+            let rain = RainSystem(food: FoodSystem.shared.tank(for: screenID))
+            fishWindows.append(makeOverlayWindow(screen: screen, level: fishLevel, rain: rain, layer: .fish, screenID: screenID))
+            overlayWindows.append(makeOverlayWindow(screen: screen, level: .screenSaver, rain: rain, layer: .water, screenID: screenID))
         }
 
         let settings = RainSettings.shared
@@ -114,7 +126,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         overlayWindows.forEach { $0.orderFrontRegardless() }
     }
 
-    private func makeOverlayWindow(screen: NSScreen, level: NSWindow.Level, rain: RainSystem, layer: OverlayLayer) -> NSWindow {
+    private func makeOverlayWindow(
+        screen: NSScreen,
+        level: NSWindow.Level,
+        rain: RainSystem,
+        layer: OverlayLayer,
+        screenID: CGDirectDisplayID
+    ) -> NSWindow {
         let window = NSWindow(
             contentRect: screen.frame,
             styleMask: [.borderless],
@@ -128,7 +146,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         window.ignoresMouseEvents = true
         window.canHide = false
-        window.contentView = NSHostingView(rootView: ContentView(rain: rain, layer: layer))
+        window.contentView = NSHostingView(rootView: ContentView(rain: rain, layer: layer, screenID: screenID))
         return window
     }
 
@@ -160,6 +178,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
 struct MenuBarView: View {
     @ObservedObject private var settings = RainSettings.shared
+    @ObservedObject private var feedingMonitor = FeedingMonitor.shared
 
     var body: some View {
         VStack(spacing: 12) {
@@ -219,6 +238,36 @@ struct MenuBarView: View {
                     .disabled(!settings.fishEnabled)
 
                 Spacer()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(isOn: $settings.feedingEnabled) {
+                    Text("Feed the Fish")
+                        .font(.system(size: 11))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
+                Text("Hold Command and right-click to drop food")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+
+                if settings.feedingEnabled && !feedingMonitor.capturesClicks {
+                    Text("The app under the cursor also gets the click. Allow Accessibility access to keep it for the fish.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Open Accessibility Settings") {
+                        feedingMonitor.requestAccess()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                    .font(.system(size: 10))
+                }
             }
         }
         .padding(16)
