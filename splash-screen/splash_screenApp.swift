@@ -87,9 +87,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Create overlay windows directly — one per screen
         createOverlayWindows()
 
-        feedingSubscription = RainSettings.shared.$feedingEnabled.sink { enabled in
-            FeedingMonitor.shared.setEnabled(enabled)
-        }
+        feedingSubscription = RainSettings.shared.$feedingEnabled
+            .combineLatest(RainSettings.shared.$fishEnabled)
+            .map { feeding, fish in feeding && fish }
+            .removeDuplicates()
+            .sink { enabled in
+                FeedingMonitor.shared.setEnabled(enabled)
+            }
 
         // Recreate overlays when monitors change
         NotificationCenter.default.addObserver(
@@ -257,12 +261,13 @@ struct MenuBarView: View {
                 }
                 .toggleStyle(.switch)
                 .controlSize(.mini)
+                .disabled(!settings.fishEnabled)
 
                 Text("Hold Command and right-click to drop food")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(settings.fishEnabled ? .secondary : .tertiary)
 
-                if settings.feedingEnabled && !feedingMonitor.capturesClicks {
+                if settings.feedingEnabled && settings.fishEnabled && !feedingMonitor.capturesClicks {
                     Text("The app under the cursor also gets the click. Allow Accessibility access to keep it for the fish.")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
