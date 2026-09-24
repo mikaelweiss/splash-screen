@@ -939,25 +939,46 @@ final class RainSystem {
 
 // MARK: - Views
 
+enum OverlayLayer {
+    case water
+    case fish
+}
+
 struct ContentView: View {
+    let rain: RainSystem
+    let layer: OverlayLayer
+
     var body: some View {
-        RainView()
+        RainView(rain: rain, layer: layer)
             .ignoresSafeArea()
     }
 }
 
 struct RainView: View {
-    @State private var rain = RainSystem()
+    let rain: RainSystem
+    let layer: OverlayLayer
     @ObservedObject private var settings = RainSettings.shared
     @State private var isPaused = false
 
+    private var fishBehindWindows: Bool {
+        settings.fishEnabled && !settings.fishInFront
+    }
+
+    private var hasNothingToDraw: Bool {
+        rain.isIdle || (layer == .fish && !fishBehindWindows)
+    }
+
     var body: some View {
+        let fishInFront = settings.fishInFront
         TimelineView(.animation(paused: isPaused)) { timeline in
             Canvas { context, size in
-                rain.update(date: timeline.date, size: size)
-                if rain.isIdle && !isPaused {
+                // The water window owns the simulation so the shared state advances once per frame
+                if layer == .water {
+                    rain.update(date: timeline.date, size: size)
+                }
+                if hasNothingToDraw && !isPaused {
                     DispatchQueue.main.async {
-                        if rain.isIdle { isPaused = true }
+                        if hasNothingToDraw { isPaused = true }
                     }
                 }
 
@@ -966,10 +987,19 @@ struct RainView: View {
                     context.translateBy(x: rain.screenShakeX, y: rain.screenShakeY)
                 }
 
+                if layer == .fish {
+                    if !fishInFront {
+                        drawFish(in: &context, size: size)
+                    }
+                    return
+                }
+
                 drawRainDrops(in: &context, size: size)
                 drawSubmarine(in: &context, size: size)
                 drawWater(in: &context, size: size)
-                drawFish(in: &context, size: size)
+                if fishInFront {
+                    drawFish(in: &context, size: size)
+                }
                 drawTorpedo(in: &context, size: size)
                 drawRipples(in: &context, size: size)
                 drawSplashes(in: &context)
@@ -1754,5 +1784,5 @@ struct RainView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(rain: RainSystem(), layer: .water)
 }

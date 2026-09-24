@@ -22,6 +22,9 @@ class RainSettings: ObservableObject {
     @Published var waterLevelEnabled: Bool {
         didSet { UserDefaults.standard.set(waterLevelEnabled, forKey: "waterLevelEnabled") }
     }
+    @Published var fishInFront: Bool {
+        didSet { UserDefaults.standard.set(fishInFront, forKey: "fishInFront") }
+    }
 
     private init() {
         let defaults = UserDefaults.standard
@@ -33,6 +36,7 @@ class RainSettings: ObservableObject {
         self.waterLevelEnabled = defaults.object(forKey: "waterLevelEnabled") != nil
             ? defaults.bool(forKey: "waterLevelEnabled")
             : true
+        self.fishInFront = defaults.bool(forKey: "fishInFront")
     }
 }
 
@@ -51,6 +55,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     var overlayWindows: [NSWindow] = []
+    var fishWindows: [NSWindow] = []
+    private var fishVisibilityCancellable: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -65,7 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         // Popover with controls
         let popover = NSPopover()
-        popover.contentSize = NSSize(width: 280, height: 100)
+        popover.contentSize = NSSize(width: 280, height: 128)
         popover.behavior = .transient
         popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: MenuBarView())
@@ -81,30 +87,58 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+
+        let settings = RainSettings.shared
+        fishVisibilityCancellable = settings.$fishEnabled
+            .combineLatest(settings.$fishInFront)
+            .sink { [weak self] enabled, inFront in
+                self?.updateFishWindowVisibility(visible: enabled && !inFront)
+            }
     }
 
     func createOverlayWindows() {
         overlayWindows.forEach { $0.orderOut(nil) }
         overlayWindows.removeAll()
+        fishWindows.forEach { $0.orderOut(nil) }
+        fishWindows.removeAll()
 
+        let fishLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         for screen in NSScreen.screens {
-            let window = NSWindow(
-                contentRect: screen.frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = false
-            window.level = .screenSaver
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-            window.ignoresMouseEvents = true
-            window.canHide = false
-            window.contentView = NSHostingView(rootView: ContentView())
-            window.orderFrontRegardless()
+            let rain = RainSystem()
+            fishWindows.append(makeOverlayWindow(screen: screen, level: fishLevel, rain: rain, layer: .fish))
+            overlayWindows.append(makeOverlayWindow(screen: screen, level: .screenSaver, rain: rain, layer: .water))
+        }
 
-            overlayWindows.append(window)
+        let settings = RainSettings.shared
+        updateFishWindowVisibility(visible: settings.fishEnabled && !settings.fishInFront)
+        overlayWindows.forEach { $0.orderFrontRegardless() }
+    }
+
+    private func makeOverlayWindow(screen: NSScreen, level: NSWindow.Level, rain: RainSystem, layer: OverlayLayer) -> NSWindow {
+        let window = NSWindow(
+            contentRect: screen.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.level = level
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        window.ignoresMouseEvents = true
+        window.canHide = false
+        window.contentView = NSHostingView(rootView: ContentView(rain: rain, layer: layer))
+        return window
+    }
+
+    private func updateFishWindowVisibility(visible: Bool) {
+        for window in fishWindows {
+            if visible {
+                window.orderFrontRegardless()
+            } else {
+                window.orderOut(nil)
+            }
         }
     }
 
@@ -175,6 +209,16 @@ struct MenuBarView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .font(.system(size: 11))
+            }
+
+            HStack {
+                Toggle("Fish in front of windows", isOn: $settings.fishInFront)
+                    .toggleStyle(.checkbox)
+                    .controlSize(.mini)
+                    .font(.system(size: 11))
+                    .disabled(!settings.fishEnabled)
+
+                Spacer()
             }
         }
         .padding(16)
