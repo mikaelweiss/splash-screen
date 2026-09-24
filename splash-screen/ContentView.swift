@@ -1226,14 +1226,18 @@ struct RainView: View {
         .onReceive(FoodSystem.shared.foodDropped.filter { $0 == screenID }) { _ in
             isPaused = false
         }
+        // Waking again after the value lands undoes a pause queued before the simulation saw it
         .onChange(of: settings.intensity) { _, newValue in
             rain.intensity = newValue
+            isPaused = false
         }
         .onChange(of: settings.fishEnabled) { _, newValue in
             rain.fishEnabled = newValue
+            isPaused = false
         }
         .onChange(of: settings.waterLevelEnabled) { _, newValue in
             rain.waterLevelEnabled = newValue
+            isPaused = false
         }
         .onChange(of: settings.drainGeneration) { _, _ in
             rain.startDrainSequence()
