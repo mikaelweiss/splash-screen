@@ -5,6 +5,7 @@
 //  Created by Mikael Weiss on 3/7/26.
 //
 
+import Combine
 import SwiftUI
 
 // MARK: - Data Models
@@ -166,6 +167,18 @@ final class RainSystem {
     /// How many drops are currently active based on intensity
     var activeDropCount: Int {
         Int(CGFloat(maxDropCount) * intensity)
+    }
+
+    /// True when nothing is drawn and nothing will change until a setting changes
+    var isIdle: Bool {
+        intensity == 0
+            && waterLevel <= 0.005
+            && splashes.isEmpty
+            && ripples.isEmpty
+            && fish.isEmpty
+            && lightningFlash <= 0
+            && impactFlash <= 0.01
+            && (drainPhase == .idle || drainPhase == .done)
     }
 
     /// Speed multiplier based on intensity (drizzle = slow, storm = fast)
@@ -936,14 +949,17 @@ struct ContentView: View {
 struct RainView: View {
     @State private var rain = RainSystem()
     @ObservedObject private var settings = RainSettings.shared
-
-    private let rainColor = Color(red: 0.7, green: 0.8, blue: 0.95)
-    private let splashColor = Color(red: 0.65, green: 0.75, blue: 0.9)
+    @State private var isPaused = false
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        TimelineView(.animation(paused: isPaused)) { timeline in
             Canvas { context, size in
                 rain.update(date: timeline.date, size: size)
+                if rain.isIdle && !isPaused {
+                    DispatchQueue.main.async {
+                        if rain.isIdle { isPaused = true }
+                    }
+                }
 
                 // Apply screen shake
                 if rain.screenShakeIntensity > 0.01 {
@@ -969,6 +985,9 @@ struct RainView: View {
             rain.intensity = settings.intensity
             rain.fishEnabled = settings.fishEnabled
             rain.waterLevelEnabled = settings.waterLevelEnabled
+        }
+        .onReceive(settings.objectWillChange) { _ in
+            isPaused = false
         }
         .onChange(of: settings.intensity) { _, newValue in
             rain.intensity = newValue
@@ -1004,16 +1023,17 @@ struct RainView: View {
             let flashBoost = Double(rain.lightningFlash) * 0.3
             let finalOpacity = min(litOpacity + flashBoost, 0.85)
 
-            var path = Path()
-            path.move(to: CGPoint(x: x, y: topY))
-            path.addLine(to: CGPoint(x: x, y: bottomY))
-
-            var dropCtx = context
-            dropCtx.opacity = finalOpacity
-            dropCtx.stroke(
-                path,
-                with: .color(rainColor),
-                style: StrokeStyle(lineWidth: drop.thickness, lineCap: .round)
+            // A filled stadium matches a round-capped stroke but skips per-drop stroke tessellation.
+            let halfWidth = drop.thickness / 2
+            let capsule = CGRect(
+                x: x - halfWidth,
+                y: topY - halfWidth,
+                width: drop.thickness,
+                height: streakLength + drop.thickness
+            )
+            context.fill(
+                Path(roundedRect: capsule, cornerRadius: halfWidth, style: .circular),
+                with: .color(.sRGB, red: 0.7, green: 0.8, blue: 0.95, opacity: finalOpacity)
             )
         }
     }
@@ -1026,17 +1046,19 @@ struct RainView: View {
         let step: CGFloat = 3
 
         // Build wavy surface path
-        var waterPath = Path()
+        var surfaceLine = Path()
         for xPos in stride(from: CGFloat(0), through: size.width, by: step) {
             let wave1 = sin(Double(xPos) * 0.02 + t * 1.8) * 1.5
             let wave2 = cos(Double(xPos) * 0.035 + t * 1.2) * 0.8
             let y = baseY + CGFloat(wave1 + wave2)
             if xPos == 0 {
-                waterPath.move(to: CGPoint(x: 0, y: y))
+                surfaceLine.move(to: CGPoint(x: 0, y: y))
             } else {
-                waterPath.addLine(to: CGPoint(x: xPos, y: y))
+                surfaceLine.addLine(to: CGPoint(x: xPos, y: y))
             }
         }
+
+        var waterPath = surfaceLine
         waterPath.addLine(to: CGPoint(x: size.width, y: size.height))
         waterPath.addLine(to: CGPoint(x: 0, y: size.height))
         waterPath.closeSubpath()
@@ -1057,18 +1079,6 @@ struct RainView: View {
         )
 
         // Surface highlight line
-        var surfaceLine = Path()
-        for xPos in stride(from: CGFloat(0), through: size.width, by: step) {
-            let wave1 = sin(Double(xPos) * 0.02 + t * 1.8) * 1.5
-            let wave2 = cos(Double(xPos) * 0.035 + t * 1.2) * 0.8
-            let y = baseY + CGFloat(wave1 + wave2)
-            if xPos == 0 {
-                surfaceLine.move(to: CGPoint(x: 0, y: y))
-            } else {
-                surfaceLine.addLine(to: CGPoint(x: xPos, y: y))
-            }
-        }
-
         var lineCtx = context
         lineCtx.opacity = 0.25 * depthFactor
         lineCtx.stroke(
@@ -1083,16 +1093,14 @@ struct RainView: View {
             let alpha = Double(splash.life * splash.life) * 0.45
             let radius = splash.size * max(splash.life, 0.15)
 
-            var ctx = context
-            ctx.opacity = alpha
-            ctx.fill(
+            context.fill(
                 Path(ellipseIn: CGRect(
                     x: splash.x - radius,
                     y: splash.y - radius,
                     width: radius * 2,
                     height: radius * 2
                 )),
-                with: .color(splashColor)
+                with: .color(.sRGB, red: 0.65, green: 0.75, blue: 0.9, opacity: alpha)
             )
         }
     }
@@ -1106,16 +1114,14 @@ struct RainView: View {
             let ellipseW = radius * 2
             let ellipseH = radius * 0.6
 
-            var ctx = context
-            ctx.opacity = alpha
-            ctx.stroke(
+            context.stroke(
                 Path(ellipseIn: CGRect(
                     x: ripple.x - ellipseW / 2,
                     y: ripple.y - ellipseH / 2,
                     width: ellipseW,
                     height: ellipseH
                 )),
-                with: .color(Color(red: 0.5, green: 0.6, blue: 0.75)),
+                with: .color(.sRGB, red: 0.5, green: 0.6, blue: 0.75, opacity: alpha),
                 style: StrokeStyle(lineWidth: 0.8)
             )
         }
