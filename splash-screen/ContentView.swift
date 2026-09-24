@@ -272,7 +272,7 @@ final class RainSystem {
             return
         }
 
-        let dt = CGFloat(min(date.timeIntervalSince(last), 1.0 / 20.0))
+        let dt = CGFloat(min(max(date.timeIntervalSince(last), 0), 1.0 / 20.0))
         lastUpdate = date
 
         updateWater(dt: dt)
