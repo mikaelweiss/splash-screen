@@ -108,10 +108,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func createOverlayWindows() {
-        overlayWindows.forEach { $0.orderOut(nil) }
-        overlayWindows.removeAll()
-        fishWindows.forEach { $0.orderOut(nil) }
-        fishWindows.removeAll()
+        closeOverlayWindows()
 
         let fishLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         for screen in NSScreen.screens {
@@ -124,6 +121,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let settings = RainSettings.shared
         updateFishWindowVisibility(visible: settings.fishEnabled && !settings.fishInFront)
         overlayWindows.forEach { $0.orderFrontRegardless() }
+    }
+
+    private func closeOverlayWindows() {
+        for window in overlayWindows + fishWindows {
+            window.contentView = nil
+            window.close()
+        }
+        overlayWindows.removeAll()
+        fishWindows.removeAll()
     }
 
     private func makeOverlayWindow(
@@ -146,6 +152,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         window.ignoresMouseEvents = true
         window.canHide = false
+        window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: ContentView(rain: rain, layer: layer, screenID: screenID))
         return window
     }
